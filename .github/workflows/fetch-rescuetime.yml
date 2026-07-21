@@ -50,11 +50,16 @@ jobs:
       # RescueTime account timezone if you fork this repo.
       TZ: Europe/Copenhagen
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure Pages
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
+        with:
+          # Auto-enable Pages (build type "GitHub Actions") if the repo
+          # doesn't have it yet — makes the very first run on a fresh
+          # repo/fork succeed without visiting Settings -> Pages first.
+          enablement: true
 
       - name: Restore archive from the live site
         run: |
@@ -76,10 +81,10 @@ jobs:
           echo "data.json:    $(wc -c < docs/data.json) bytes"
 
       - name: Upload site as Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: docs
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

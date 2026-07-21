@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<title>Home - All Data</title>
+<style>
+  :root { --bg: #1e1e1e; --text-dim: #909090; }
+  * { box-sizing: border-box; margin: 0;
+      scrollbar-width: none; -ms-overflow-style: none; }  /* no visible scrollbars */
+  *::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  html { font-size: clamp(8px, 2.4vw, 14px); }
+  body { background: var(--bg); }
+  iframe {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: var(--bg);
+  }
+  .footer {
+    display: flex;
+    justify-content: space-between;  /* countdown | data range | updated */
+    max-width: 900px;
+    margin: 4px auto 10px;
+    padding: 0 clamp(4px, 1.2vw, 16px);
+    font: 0.8rem/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--text-dim);
+  }
+  /* equal thirds so the middle item is truly centered on the page */
+  .footer > div { flex: 1 1 0; white-space: nowrap; }
+  #dataSince { text-align: center; }
+  #updated { text-align: right; }
+</style>
+</head>
+<body>
+
+<!-- ONE combined page (pulse + search + weeks/months cards) so the search's
+     detail cards overlay every card. Search-Apps-Pulse.html and
+     Weeks-Months.html still work standalone as separate widgets. -->
+<iframe id="frameAll" src="All-Data.html?v=54" title="All data"></iframe>
+
+<div class="footer">
+  <div id="refreshIn">Refresh data in –</div>
+  <div id="dataSince"></div>
+  <div id="updated"></div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Same-origin iframes: size each to its content so the page scrolls as one.
+// ---------------------------------------------------------------------------
+function fitFrames() {
+  for (const f of document.querySelectorAll("iframe")) {
+    try {
+      const doc = f.contentDocument;
+      const grid = doc?.querySelector(".grid");
+      if (grid) {
+        // Measure the card grid directly: grid bottom + the page's own bottom
+        // padding (= half a card gap). scrollHeight rounds down and can drop
+        // the body's bottom padding, which squeezed the space between the two
+        // pages below the normal card gap; ceil keeps every gap identical.
+        const pad = parseFloat(doc.defaultView.getComputedStyle(doc.body).paddingBottom) || 0;
+        let bottom = grid.getBoundingClientRect().bottom;
+        // the app detail card AND the suggestion list float as overlays below
+        // the search bar and can reach past the grid — include whichever is
+        // open in the height so they never get clipped
+        for (const id of ["appDetailCard", "searchSug"]) {
+          const ov = doc.getElementById(id);
+          if (ov && !ov.hidden)
+            bottom = Math.max(bottom, ov.getBoundingClientRect().bottom);
+        }
+        f.style.height = (bottom + pad).toFixed(2) + "px";
+      } else if (doc?.body) {
+        f.style.height = doc.documentElement.scrollHeight + "px";
+      }
+    } catch {}
+  }
+}
+for (const f of document.querySelectorAll("iframe"))
+  f.addEventListener("load", () => {
+    fitFrames();
+    // The 'load' event fires BEFORE data.json arrives and the charts render,
+    // so the first measurement is too short and the lower cards were cut off
+    // until the next poll. A ResizeObserver on each page's card grid re-fits
+    // the very moment its content changes size — no visible snap.
+    try {
+      const doc = f.contentDocument;
+      const grid = doc.querySelector(".grid") ?? doc.body;
+      const ro = new doc.defaultView.ResizeObserver(fitFrames);
+      ro.observe(grid);
+      // the overlays open/close without changing the grid's size, so watch
+      // them as well — showing/hiding fires the observer (0 <-> N px)
+      for (const id of ["appDetailCard", "searchSug"]) {
+        const ov = doc.getElementById(id);
+        if (ov) ro.observe(ov);
+      }
+    } catch {}
+  });
+window.addEventListener("resize", fitFrames);
+setInterval(fitFrames, 5000); // safety net only; the observer does the real work
+
+// ---------------------------------------------------------------------------
+// Footer: "Updated ..." from data.json + countdown to the next Action run.
+// The GitHub Action is scheduled every half hour at :04/:34 (cron
+// "4,34 * * * *" — moved OFF the congested :00/:30 slots where GitHub
+// delays or silently drops scheduled runs); the countdown targets the same
+// wall-clock marks.
+// NOTE: the countdown marks when the run is SCHEDULED to start — GitHub can
+// start cron runs a few minutes late, and the run + Pages deploy add ~2-4
+// min — so we reload 5s after zero and the "Updated" stamp shows what
+// actually landed.
+// ---------------------------------------------------------------------------
+async function showUpdated() {
+  try {
+    const r = await fetch("data.json", { cache: "no-store" });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    document.getElementById("updated").textContent =
+      d.generated_at ? `Updated ${new Date(d.generated_at).toLocaleString()}` : "";
+    // Centre: how far back the archive reaches — a few weeks on a Lite
+    // account, potentially years once premium history is backfilled.
+    document.getElementById("dataSince").textContent = d.history_start
+      ? `Data Since ${new Date(d.history_start).toLocaleDateString()}`
+      : "";
+  } catch {
+    document.getElementById("updated").textContent = "No Data";
+    document.getElementById("dataSince").textContent = "";
+  }
+}
+showUpdated();
+
+function nextRefreshTime() {
+  // next :04 or :34 (the workflow's cron marks), local clock
+  const t = new Date();
+  const next = new Date(t);
+  const m = t.getMinutes();
+  next.setMinutes(m < 4 ? 4 : m < 34 ? 34 : 64, 0, 0);  // 64 rolls into the next hour's :04
+  return next;
+}
+
+let target = nextRefreshTime();
+setInterval(() => {
+  const ms = target - Date.now();
+  const el = document.getElementById("refreshIn");
+  if (ms > 0) {
+    const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+    el.textContent = `Refresh data in ${m}:${String(s).padStart(2, "0")} min`;
+  } else if (ms > -5000) {
+    el.textContent = "Refreshing…";
+  } else {
+    // countdown reached 0 + 5s: reload both iframes and the updated stamp
+    for (const f of document.querySelectorAll("iframe"))
+      f.contentWindow.location.reload();
+    showUpdated();
+    target = nextRefreshTime();
+  }
+}, 1000);
+</script>
+</body>
+</html>

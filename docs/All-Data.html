@@ -1,0 +1,1898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>All Data</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="styles.css?v=55">
+
+</head>
+<body>
+
+<div class="grid grid-2">
+  <!-- 0. App search: fuzzy search over every app in the archive. Both the
+       suggestion list and the app detail card are OVERLAYS anchored under the
+       search bar — they float on top of the cards below, which never move.
+       ↑/↓ selects a suggestion, Enter (or a click) opens the detail card;
+       clicking the detail card closes it. -->
+  <div class="card" id="searchCard" style="grid-column: 1 / -1">
+    <input class="search-input" id="appSearch" type="text"
+           placeholder="Search Apps, Periods or Categories…" autocomplete="off" spellcheck="false">
+    <div class="search-sug" id="searchSug" hidden></div>
+    <div class="card" id="appDetailCard" hidden>
+      <div class="app-head">
+        <h2 id="appDetailTitle">App</h2>
+        <div class="app-fresh" id="appDetailFresh"></div>
+      </div>
+      <div class="app-detail" id="appDetailRows"></div>
+    </div>
+  </div>
+
+  <!-- 1. Pulse: past-24h / week / month donuts (label inside the hole) + trend delta bars.
+       Clicking opens RescueTime: left third = today, middle = week, right = month. -->
+  <div class="card" id="pulseCard" style="grid-column: 1 / -1">
+    <!-- Every .donuts row shares the same grid: one narrow DATA column on the
+         far left (row labels for the bars now; more numbers later) + the three
+         period columns. -->
+    <div class="donuts">
+      <div class="label-col ring-stat-col">
+        <!-- Hours until the PAST-7-DAYS pulse would hit 50: the Distracting
+             time still addable while above 50 (red), or the Productive time
+             needed while below it (blue). Value = same size and height as
+             the pulse numbers; the label hangs below like the ring labels. -->
+        <div class="ring-stat" id="to50Today" hidden>
+          <div class="stat-inner">
+            <div class="ring-stat-val big" id="to50Val">–</div>
+            <div class="row-label multi" id="to50Word">Distracting<br>Time Needed<br>To 50</div>
+          </div>
+        </div>
+      </div>
+      <!-- inside each ring: total logged hours ABOVE the pulse number (same
+           style as the period label BELOW it) -->
+      <div class="donut-col">
+        <div class="pulse-wrap">
+          <canvas id="donutToday"></canvas>
+          <div class="pulse-center"><div class="pulse-inner">
+            <div class="pulse-label" id="totalToday">–</div>
+            <div class="pulse-num" id="numToday">–</div>
+            <div class="pulse-label" id="labelToday">–</div>
+          </div></div>
+        </div>
+        <div class="pulse-pct" id="pct24h" hidden></div>
+      </div>
+      <div class="donut-col">
+        <div class="pulse-wrap">
+          <canvas id="donutWeek"></canvas>
+          <div class="pulse-center"><div class="pulse-inner">
+            <div class="pulse-label" id="totalWeek">–</div>
+            <div class="pulse-num" id="numWeek">–</div>
+            <div class="pulse-label">7 Days</div>
+          </div></div>
+        </div>
+        <div class="pulse-pct" id="pctWeek" hidden></div>
+      </div>
+      <div class="donut-col">
+        <div class="pulse-wrap">
+          <canvas id="donutMonth"></canvas>
+          <div class="pulse-center"><div class="pulse-inner">
+            <div class="pulse-label" id="totalMonth">–</div>
+            <div class="pulse-num" id="numMonth">–</div>
+            <div class="pulse-label">30 Days</div>
+          </div></div>
+        </div>
+        <div class="pulse-pct" id="pctMonth" hidden></div>
+      </div>
+    </div>
+    <div class="donuts">
+      <!-- ONE set of bar labels for the whole card, aligned with the bar rows
+           of every period column. Order matches makeDeltas: Total, Prod, Dist. -->
+      <div class="label-col delta-label-col">
+        <div class="row-label">Productive</div>
+        <div class="row-label">Distracting</div>
+      </div>
+      <div class="donut-col"><div class="deltas" id="deltaToday"></div></div>
+      <div class="donut-col"><div class="deltas" id="deltaWeek"></div></div>
+      <div class="donut-col"><div class="deltas" id="deltaMonth"></div></div>
+    </div>
+  </div>
+
+  <!-- 2a. Top apps over the ROLLING past 24 hours (hourly data) — same
+       bar-list look as Weeks-Months.html -->
+  <div class="card" id="card24h">
+    <div class="card-head">
+      <h2 id="card24hTitle">Top Apps</h2>
+      <div class="card-stat" id="tot24Head"></div>
+    </div>
+    <div class="bar-list" id="appList24h"></div>
+  </div>
+
+  <!-- 2b. Past 14 days incl. today, newest first, diverging.
+       No date labels: dates + apps show in the hover tooltip.
+       Title row: name | daily average | total logged. -->
+  <div class="card">
+    <div class="card-head">
+      <h2>14 Days</h2>
+      <div class="card-stat" id="avg14Head"></div>
+      <div class="card-stat" id="tot14Head"></div>
+    </div>
+    <div class="chart-fill"><canvas id="dayChart"></canvas></div>
+  </div>
+
+  <!-- 3. The Weeks-Months cards, merged into this ONE page so the search
+       overlays (detail cards) float over EVERYTHING. Row: apps side by side
+       (past 7 days | past 30 days), then categories for the same windows —
+       ROLLING windows, matching the pulse rings. -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Top Apps - 7 Days</h2>
+      <div class="card-stat" id="avgWeekApps"></div>
+      <div class="card-stat" id="totWeekApps"></div>
+    </div>
+    <div class="bar-list" id="appListWeek"></div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <h2>Top Apps - 30 Days</h2>
+      <div class="card-stat" id="avgMonthApps"></div>
+      <div class="card-stat" id="totMonthApps"></div>
+    </div>
+    <div class="bar-list" id="appListMonth"></div>
+  </div>
+  <!-- category cards: instead of avg/total (already on the apps cards above)
+       the title row carries the per-level split, anchored LEFT -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Top Categories - 7 Days</h2>
+      <div class="card-stat cat-mix" id="mixWeekCats"></div>
+    </div>
+    <div class="bar-list" id="catListWeek"></div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <h2>Top Categories - 30 Days</h2>
+      <div class="card-stat cat-mix" id="mixMonthCats"></div>
+    </div>
+    <div class="bar-list" id="catListMonth"></div>
+  </div>
+</div>
+
+<script>
+// ---- shared core: constants, helpers, data loading, demo data ----
+const LEVELS = ["2", "1", "0", "-1", "-2"];
+const COLORS = { "2": "#2563ae", "1": "#5b9bd5", "0": "#8c96a3", "-1": "#e8913a", "-2": "#d64541" };
+const NAMES  = { "2": "Very Productive", "1": "Productive", "0": "Neutral", "-1": "Distracting", "-2": "Very Distracting" };
+const WEIGHT = { "2": 1, "1": 0.75, "0": 0.5, "-1": 0.25, "-2": 0 };
+const BLUE = "#5b9bd5", RED = "#d64541";
+const NO_ANIM = { animation: false, animations: false,
+                  transitions: { resize: { animation: { duration: 0 } } } };
+const hrs = sec => +(sec / 3600).toFixed(1);
+function emptyLevels() { return { "2":0, "1":0, "0":0, "-1":0, "-2":0 }; }
+function pulseOf(lv) {
+  const t = LEVELS.reduce((a, l) => a + lv[l], 0);
+  return t ? Math.round(100 * LEVELS.reduce((a, l) => a + lv[l] * WEIGHT[l], 0) / t) : 0;
+}
+function weekStart(d) {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+function monthStart(d) { const x = new Date(d); x.setHours(0,0,0,0); x.setDate(1); return x; }
+function isoWeekNum(d) {   // ISO-8601 calendar week number (weeks start Monday)
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() + 3 - ((x.getDay() + 6) % 7));   // this week's Thursday
+  const w1 = new Date(x.getFullYear(), 0, 4);            // Jan 4 is always week 1
+  return 1 + Math.round(((x - w1) / 864e5 - 3 + ((w1.getDay() + 6) % 7)) / 7);
+}
+const prodOf = lv => lv["2"] + lv["1"];
+const distOf = lv => lv["-1"] + lv["-2"];
+
+async function loadJson(file, fallback) {
+  try {
+    const r = await fetch(file, { cache: "no-store" });
+    if (!r.ok) throw new Error("missing " + file);
+    return await r.json();
+  } catch { return fallback; }
+}
+
+function setStamp(data) {
+  const el = document.getElementById("stamp");
+  if (el) el.textContent = data.generated_at
+    ? `Updated ${new Date(data.generated_at).toLocaleString()}`
+    : "No Data";
+}
+
+
+// NOTE: no page-wide RescueTime link — only the period-specific click
+// zones (pulse thirds, day bars, list cards) open rescuetime.com.
+
+
+// External Chart.js tooltip: renders into a shared <div> instead of the canvas.
+// Placed ABOVE the hovered arc/bar (flips below only if there's no room), and
+// clamped to the viewport so long app lists never get cut off.
+function htmlTooltip(ctx) {
+  const { chart, tooltip } = ctx;
+  let el = document.getElementById("chartjs-tooltip");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "chartjs-tooltip";
+    document.body.appendChild(el);
+  }
+  if (tooltip.opacity === 0) { el.style.opacity = "0"; return; }
+
+  // Rebuild content from the same callbacks (label -> lines, afterLabel -> after)
+  const title = (tooltip.title ?? []).join("\n");
+  const lines = (tooltip.body ?? [])
+    .flatMap(b => [...(b.before ?? []), ...(b.lines ?? []), ...(b.after ?? [])]);
+  el.replaceChildren();
+  if (title) {
+    const t = document.createElement("div");
+    t.className = "tt-title"; t.textContent = title;
+    el.appendChild(t);
+  }
+  const bodyEl = document.createElement("div");
+  bodyEl.textContent = lines.join("\n");
+  el.appendChild(bodyEl);
+  el.style.opacity = "1";
+
+  // Anchor at the caret, prefer above, clamp into the viewport horizontally
+  const rect = chart.canvas.getBoundingClientRect();
+  const x = rect.left + window.scrollX + tooltip.caretX;
+  const y = rect.top + window.scrollY + tooltip.caretY;
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const minLeft = window.scrollX + 4;
+  const maxLeft = window.scrollX + document.documentElement.clientWidth - w - 4;
+  el.style.left = Math.max(minLeft, Math.min(x - w / 2, maxLeft)) + "px";
+  let top = y - h - 10;                       // above the point
+  if (top < window.scrollY + 4) top = y + 10; // flip below if it would leave the page
+  el.style.top = top + "px";
+}
+const HTML_TOOLTIP = { enabled: false, position: "nearest", external: htmlTooltip };
+
+// ---- full-width list bars + instant hover tooltip: same markup, styling and
+//      behaviour as the cards in Weeks-Months.html ----
+function renderBarList(elId, entries) { // entries: [name, seconds, level, tooltip]
+  const host = document.getElementById(elId);
+  if (!entries.length) {
+    host.innerHTML =
+      '<div style="color:var(--text-dim);font-size:0.8rem">No Data</div>';
+    return;
+  }
+  const max = Math.max(...entries.map(e => e[1]), 1);
+  // entry[4] (optional) = %-vs-previous-period label, anchored RIGHT; the
+  // main label reads "Xh Name" at the LEFT; the bar grows right-to-left
+  // underneath (the site-wide mirrored bar style)
+  host.innerHTML = entries.map(([name, sec, lvl, , pct]) => `
+    <div class="cat-row">
+      <div class="cat-bar" style="width:${(100 * sec / max).toFixed(1)}%;
+           background:${COLORS[lvl]}"></div>
+      ${pct != null ? `<div class="cat-label pct"><span class="cat-time">${pct}</span></div>` : ""}
+      <div class="cat-label">
+        <span class="cat-name">${name}</span><span class="cat-time">${(sec / 3600).toFixed(1)}h</span>
+      </div>
+    </div>`).join("");
+  // Attach tooltip text via the DOM (no HTML-escaping pitfalls in attributes)
+  host.querySelectorAll(".cat-row").forEach((row, i) => {
+    row.dataset.tipTitle = entries[i][0];
+    row.dataset.tipBody  = entries[i][3] ?? "";
+  });
+}
+
+function tooltipEl() {
+  let el = document.getElementById("chartjs-tooltip");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "chartjs-tooltip";
+    document.body.appendChild(el);
+  }
+  return el;
+}
+document.addEventListener("mousemove", e => {
+  // Anything carrying data-tip-title gets the shared tooltip: list rows
+  // (.cat-row) AND the pulse card's bar rows/cells set by makeDeltas.
+  const row = e.target.closest?.("[data-tip-title]");
+  if (!row?.dataset.tipTitle) {
+    // Over a canvas, Chart.js owns the shared tooltip element — leave it alone
+    if (!(e.target instanceof HTMLCanvasElement)) tooltipEl().style.opacity = "0";
+    return;
+  }
+  const el = tooltipEl();
+  el.replaceChildren();
+  const t = document.createElement("div");
+  t.className = "tt-title"; t.textContent = row.dataset.tipTitle;
+  el.appendChild(t);
+  if (row.dataset.tipBody) {
+    const b = document.createElement("div");
+    b.textContent = row.dataset.tipBody;
+    el.appendChild(b);
+  }
+  el.style.opacity = "1";
+  // above the row, centered on the cursor, clamped to the viewport
+  const r = row.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const minLeft = window.scrollX + 4;
+  const maxLeft = window.scrollX + document.documentElement.clientWidth - w - 4;
+  el.style.left = Math.max(minLeft, Math.min(e.clientX + window.scrollX - w / 2, maxLeft)) + "px";
+  let top = r.top + window.scrollY - h - 10;
+  if (top < window.scrollY + 4) top = r.bottom + window.scrollY + 10; // flip below
+  el.style.top = top + "px";
+});
+
+// tipTitle names the exact window the ring shows ("Current 24 Hours (Hourly
+// Data)", "Current 7 Days (Rolling)" ...) as the hover tooltip's title line.
+function makeDonut(canvasId, numId, lv, acts, appName, tipTitle) {
+  const p = pulseOf(lv);
+  const numEl = document.getElementById(numId);
+  numEl.textContent = p;
+  numEl.style.color = p >= 50 ? "var(--pulse)" : "var(--vdist)"; // 50+ blue, below red
+  // acts: activity rows for this donut's period, used for per-slice app
+  // tooltips. Apps sharing a display name (dictionary.json) combine into one line.
+  const perLevel = {};
+  for (const [, sec, , activity, , prod] of (acts ?? [])) {
+    const m = (perLevel[String(prod)] ??= new Map());
+    const n = appName(activity);
+    m.set(n, (m.get(n) ?? 0) + sec);
+  }
+  for (const l of Object.keys(perLevel))
+    perLevel[l] = [...perLevel[l]].sort((a, b) => b[1] - a[1]);
+
+  // Extremes render as one solid full ring: pulse 0 -> all red, 100 -> all
+  // blue. Also covers "no data yet" (pulse 0, otherwise an invisible donut).
+  if (p === 0 || p === 100) {
+    const level = p === 100 ? "2" : "-2";
+    const total = LEVELS.reduce((a, l) => a + lv[l], 0);
+    const solidMerged = new Map();
+    for (const [, sec, , activity] of (acts ?? [])) {
+      const n = appName(activity);
+      solidMerged.set(n, (solidMerged.get(n) ?? 0) + sec);
+    }
+    const apps = [...solidMerged].sort((a, b) => b[1] - a[1]);
+    new Chart(document.getElementById(canvasId), {
+      type: "doughnut",
+      data: { datasets: [{ data: [1], backgroundColor: [COLORS[level]],
+                           borderWidth: 0, cutout: "80%" }]},
+      options: { responsive: true, maintainAspectRatio: false, ...NO_ANIM,
+        plugins: { legend: { display: false },  // an empty legend still reserves space above the ring
+          tooltip: { ...HTML_TOOLTIP, callbacks: {
+          title: () => tipTitle ?? "",
+          label: () => total ? ` ${hrs(total)}h ${NAMES[level]}` : " no data yet",
+          afterLabel: () => apps.slice(0, 5).map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n"),
+        } } } },
+    });
+    return;
+  }
+  new Chart(document.getElementById(canvasId), {
+    type: "doughnut",
+    data: { datasets: [{
+      data: LEVELS.map(l => lv[l]),
+      backgroundColor: LEVELS.map(l => COLORS[l]),
+      borderWidth: 0, cutout: "80%",
+    }]},
+    options: { responsive: true, maintainAspectRatio: false, ...NO_ANIM,
+      plugins: { legend: { display: false },  // an empty legend still reserves space above the ring
+        tooltip: { ...HTML_TOOLTIP, callbacks: {
+        title: () => tipTitle ?? "",
+        label: c => ` ${hrs(c.raw)}h ${NAMES[LEVELS[c.dataIndex]]}`,
+        afterLabel: c => {
+          const apps = perLevel[LEVELS[c.dataIndex]] ?? [];
+          if (!apps.length) return "";
+          return apps.slice(0, 5).map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+        },
+      } } } },
+  });
+}
+
+Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then(([data, renames]) => {
+  if (!data) data = { rows_daily: [], week_activities: [], month_activities: [],
+                    day_activities: {}, hour_activities: [], generated_at: null };  // NO demo data: show zeros / "No Data"
+  // Lowercased keys -> case-insensitive lookup (matches Weeks-Months.html)
+  const appMap = Object.fromEntries(Object.entries(renames.apps ?? renames)
+    .map(([k, v]) => [k.toLowerCase(), v]));
+  const appName = raw => appMap[String(raw).toLowerCase()] ?? raw;
+  const catMap = Object.fromEntries(Object.entries(renames.categories ?? {})
+    .map(([k, v]) => [k.toLowerCase(), v]));
+  const catName = raw => catMap[String(raw).toLowerCase()] ?? raw;
+
+  // ---- bucket daily rows ----
+  const days = new Map(), weeks = new Map(), months = new Map();
+  for (const [date, sec, , prod] of (data.rows_daily ?? [])) {
+    const d = new Date(date); d.setHours(0,0,0,0);
+    for (const [map, key] of [[days, d.getTime()],
+                              [weeks, weekStart(d).getTime()],
+                              [months, monthStart(d).getTime()]]) {
+      if (!map.has(key)) map.set(key, emptyLevels());
+      map.get(key)[String(prod)] += sec;
+    }
+  }
+  const now = new Date(); now.setHours(0,0,0,0);
+  const isoOf = ms => { const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+  // ROLLING windows instead of calendar ones: the "week" pulse is the past
+  // 7 days (incl. today) compared to the 7 days before that; the "month"
+  // pulse is the past 30 days compared to the 30 days before that.
+  const daysAgo = n => { const x = new Date(now); x.setDate(now.getDate() - n); return x; };
+  const sumRange = (from, to) => {  // inclusive date range over the days map
+    const acc = emptyLevels();
+    for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+      const lv = days.get(d.getTime());
+      if (lv) for (const l of LEVELS) acc[l] += lv[l];
+    }
+    return acc;
+  };
+  const orNull = lv => LEVELS.some(l => lv[l]) ? lv : null;  // "no comparison" if empty
+  const curWkLv  = sumRange(daysAgo(6),  now);
+  const prevWkLv = orNull(sumRange(daysAgo(13), daysAgo(7)));
+  const curMoLv  = sumRange(daysAgo(29), now);
+  const prevMoLv = orNull(sumRange(daysAgo(59), daysAgo(30)));
+
+  // Past-7-days app rows for the week donut's tooltips: merge the per-day
+  // activity lists (one row per app+level).
+  const curWkRows = (() => {
+    const acc = new Map();
+    for (const d = new Date(daysAgo(6)); d <= now; d.setDate(d.getDate() + 1)) {
+      for (const [, sec, , activity, cat, prod] of (data.day_activities ?? {})[isoOf(d.getTime())] ?? []) {
+        const k = activity + "|" + prod;
+        const e = acc.get(k) ?? [0, 0, 1, activity, cat, prod];
+        e[1] += sec; acc.set(k, e);
+      }
+    }
+    return [...acc.values()];
+  })();
+
+  // ---- ROLLING PAST 24 HOURS (first pulse + the top-apps card) ----
+  // Built from hour_activities — the hourly rows the fetcher pulls for the
+  // last ~48 h — so the window is a TRUE rolling 24 hours ending now, not
+  // calendar days. The 24 hours BEFORE that window give the trend baseline.
+  // Hour rows share the rank-row shape [hour, sec, people, app, cat, prod];
+  // the hour strings carry no timezone, so Date() reads them as LOCAL time
+  // (the fetcher runs with TZ=Europe/Copenhagen — same clock as the viewer).
+  const nowMs = Date.now();
+  const cut24 = nowMs - 24 * 36e5, cut48 = nowMs - 48 * 36e5;
+  const acts24 = [], actsPrev24 = [];
+  for (const row of (data.hour_activities ?? [])) {
+    const t = new Date(row[0]).getTime();
+    if (t > cut24 && t <= nowMs) acts24.push(row);
+    else if (t > cut48 && t <= cut24) actsPrev24.push(row);
+  }
+  const levelsOf = rows => { const r = emptyLevels();
+    for (const [, sec, , , , prod] of rows) r[String(prod)] += sec; return r; };
+  const lv24 = levelsOf(acts24);
+  const prev24Lv = orNull(levelsOf(actsPrev24));
+  document.getElementById("labelToday").textContent = "24 Hours";
+  document.getElementById("card24hTitle").textContent = "Top Apps - 24 Hours";
+  // total logged hours of the window, anchored right on the card title row
+  const tot24Sec = LEVELS.reduce((a, l) => a + lv24[l], 0);
+  const tot24El = document.getElementById("tot24Head");
+  tot24El.textContent = `${hrs(tot24Sec)}h Logged`;
+  tot24El.dataset.tipTitle = `${hrs(tot24Sec)}h Logged In The Current 24 Hours`;
+  tot24El.dataset.tipBody = "Rolling Window Ending Now (Hourly Data)";
+
+  // ---- donuts: past 24 hours | past 7 days | past 30 days ----
+  makeDonut("donutToday", "numToday", lv24, acts24, appName,
+            "Current 24 Hours (Rolling, Hourly Data)");
+  makeDonut("donutWeek",  "numWeek",  curWkLv, curWkRows, appName,
+            "Current 7 Days (Rolling, Incl. Today)");
+  makeDonut("donutMonth", "numMonth", curMoLv, data.month_activities, appName,
+            "Current 30 Days (Rolling, Incl. Today)");
+  // total logged hours of each window, shown INSIDE the ring above the pulse
+  const lvSum = l => LEVELS.reduce((a, k) => a + l[k], 0);
+  document.getElementById("totalToday").textContent = `${hrs(tot24Sec)}h`;
+  document.getElementById("totalWeek").textContent  = `${hrs(lvSum(curWkLv))}h`;
+  document.getElementById("totalMonth").textContent = `${hrs(lvSum(curMoLv))}h`;
+
+  // Two bar rows under each pulse: Productive | Distracting hours.
+  // The 24h bars are scaled against the 7-DAY DAILY AVERAGE (100% of the bar
+  // = the average productive/distracting hours per day over the past 7 days),
+  // so a full bar means "the past 24 hours match a typical day".
+  makeDeltas("deltaToday", lv24, acts24, appName, prev24Lv, {
+    prod: hrs(prodOf(curWkLv) / 7),
+    down: hrs((distOf(curWkLv) + curWkLv["0"]) / 7),
+  });
+  makeDeltas("deltaWeek",  curWkLv, curWkRows, appName, prevWkLv);
+  makeDeltas("deltaMonth", curMoLv, data.month_activities, appName, prevMoLv);
+
+  // ---- "% of the previous period" line under each pulse, RescueTime-style:
+  //      current pulse as a percentage of the previous period's pulse, with a
+  //      blue up-arrow at/above 100% and a red down-arrow below it ----
+  const pulsePct = (elId, cur, prev, fromText, tipBody) => {
+    const el = document.getElementById(elId);
+    const curP = pulseOf(cur), prevP = prev ? pulseOf(prev) : 0;
+    if (!prevP || !LEVELS.some(l => cur[l])) { el.hidden = true; return; }
+    const pct = Math.round(100 * curP / prevP);
+    const up = pct >= 100;
+    el.hidden = false;
+    el.innerHTML = `<span class="pct-arrow" style="color:${up ? BLUE : RED}">` +
+      `${up ? "▲" : "▼"}</span> ${pct}% ${fromText}`;
+    el.dataset.tipTitle = `Pulse ${curP} Vs ${prevP} — ${pct}% Of The Previous Period`;
+    el.dataset.tipBody = tipBody;
+  };
+  pulsePct("pct24h", lv24, prev24Lv, "From Prior 24 Hours",
+    "Current 24 Hours (Rolling)\nVs The Prior 24 Hours");
+  pulsePct("pctWeek", curWkLv, prevWkLv, "From Week Before",
+    "Current 7 Days Vs The Prior 7 Days");
+  pulsePct("pctMonth", curMoLv, prevMoLv, "From Month Before",
+    "Current 30 Days Vs The Prior 30 Days");
+
+  // ---- hours to pulse 50, next to the rings ----
+  // With WEIGHT mirrored around 0.5, pulse == 50 exactly when
+  // 2·VeryProd + Prod == Dist + 2·VeryDist (Neutral sits ON the 50 line and
+  // can never move the pulse across it). The surplus in plain-Distracting
+  // hours is S = 2·vp + p − d − 2·vd: while above 50 you could still add S
+  // hours of Distracting time today; below 50 you need |S| hours of
+  // Productive time to climb back to 50.
+  // Based on the PAST 7 DAYS — the same window as the 7-day pulse ring.
+  const to50Sec = 2 * curWkLv["2"] + curWkLv["1"] - curWkLv["-1"] - 2 * curWkLv["-2"];
+  if (LEVELS.some(l => curWkLv[l])) {
+    const down = to50Sec >= 0;           // at/above 50: show the Distracting budget
+    // AVERAGE PER DAY over the NEXT 7 days (the window rolls, so if the
+    // coming days otherwise match the recent average, this much weighted
+    // Productive/Distracting time per day moves the 7-day pulse to 50).
+    const h = hrs(Math.abs(to50Sec) / 7);
+    const el = document.getElementById("to50Today");
+    const valEl = document.getElementById("to50Val");
+    valEl.textContent = h + "h";
+    valEl.style.color = down ? "var(--vdist)" : "var(--pulse)";  // red = Dist, blue = Prod
+    document.getElementById("to50Word").innerHTML =
+      (down ? "Distracting" : "Productive") + "<br>Needed Per Day<br>To 50";
+    el.hidden = false;
+    el.dataset.tipTitle = `${h}h ${down ? "Distracting" : "Productive"} Per Day Until The 7-Day Pulse Is 50`;
+    el.dataset.tipBody = down
+      ? "Distracting Time You Could Add Per Day Over The\nNext 7 Days (If They Otherwise Match Your Recent\nAverage) Before The Pulse Drops To 50.\nVery Distracting Counts Double."
+      : "Productive Time Needed Per Day Over The\nNext 7 Days (If They Otherwise Match Your Recent\nAverage) To Lift The Pulse To 50.\nVery Productive Counts Double.";
+  }
+
+  // ---- 14-day card title row: "14 Days" | daily average | total ----
+  const lv14avg = sumRange(daysAgo(13), now);
+  const tot14avg = LEVELS.reduce((a, l) => a + lv14avg[l], 0);
+  if (tot14avg) {
+    const avgEl = document.getElementById("avg14Head");
+    const avgH = hrs(tot14avg / 14);
+    avgEl.textContent = `${avgH}h Avg per day`;
+    avgEl.dataset.tipTitle = `${avgH}h Logged Per Day On Average`;
+    avgEl.dataset.tipBody = "Current 14 Days Incl. Today";
+    const totEl = document.getElementById("tot14Head");
+    totEl.textContent = `Total ${hrs(tot14avg)}h`;
+    totEl.dataset.tipTitle = `${hrs(tot14avg)}h Logged In Total`;
+    totEl.dataset.tipBody = "Current 14 Days Incl. Today";
+  }
+
+  // ---- click zones: pulse card thirds -> the period each column shows;
+  //      the last-24h card -> today's day view ----
+  const rtOpen = tail =>
+    window.open("https://www.rescuetime.com/dashboard/for/the/" + tail, "_blank", "noopener");
+  const pulseCard = document.getElementById("pulseCard");
+  pulseCard.addEventListener("click", e => {
+    e.stopPropagation();
+    const rect = pulseCard.getBoundingClientRect();
+    const third = Math.min(2, Math.max(0,
+      Math.floor((e.clientX - rect.left) / (rect.width / 3))));
+    // current week / current month, matching what the donuts show
+    rtOpen(third === 0 ? "day/of/"   + isoOf(now.getTime())
+         : third === 1 ? "week/of/"  + isoOf(now.getTime())
+         :               "month/of/" + isoOf(now.getTime()));
+  });
+  document.getElementById("card24h").addEventListener("click", e => {
+    e.stopPropagation();
+    rtOpen("day/of/" + isoOf(now.getTime()));
+  });
+
+  // ---- top apps over the rolling past 24 hours: same rows as the first
+  // pulse (acts24). Sum per DISPLAY name, so apps renamed to the same thing
+  // in dictionary.json (e.g. the Claude app + claude.ai) combine into ONE
+  // bar. Category and level come from the largest contributor.
+  const agg = new Map();
+  for (const [, sec, , activity, cat, prod] of acts24) {
+    const name = appName(activity);
+    const k = name.toLowerCase();
+    const e = agg.get(k) ?? { name, sec: 0, top: 0, cat, prod: String(prod) };
+    e.sec += sec;
+    if (sec > e.top) { e.top = sec; e.cat = cat; e.prod = String(prod); }
+    agg.set(k, e);
+  }
+  // the PRIOR 24 hours per display name, for the % vs previous period
+  const prevAgg = new Map();
+  for (const [, sec, , activity] of actsPrev24) {
+    const k = appName(activity).toLowerCase();
+    prevAgg.set(k, (prevAgg.get(k) ?? 0) + sec);
+  }
+  const rows24List = [...agg.values()]
+    .sort((a, b) => b.sec - a.sec)
+    .map(e => {
+      const prevSec = prevAgg.get(e.name.toLowerCase());
+      const pct = prevSec > 0 ? Math.round(100 * e.sec / prevSec) + "%" : "No Trend";
+      return [e.name, e.sec, e.prod,
+        `${catName(e.cat)} — ${NAMES[e.prod]}, ${hrs(e.sec)}h` +
+        (prevSec > 0 ? `\n${pct} Of The Prior 24 Hours (${hrs(prevSec)}h)`
+                     : "\nNot Used In The Prior 24 Hours (No Trend)"),
+        pct];
+    });
+  // Show at most 8 apps; still drop rows that overflow the list's box on
+  // very small widgets. Re-fit on resize.
+  const list24 = document.getElementById("appList24h");
+  const fit24 = () => {
+    renderBarList("appList24h", rows24List.slice(0, 8));
+    const limit = list24.getBoundingClientRect().bottom + 1;
+    for (const row of [...list24.children])
+      if (row.getBoundingClientRect().bottom > limit) row.remove();
+  };
+  fit24();
+  window.addEventListener("resize", fit24);
+
+  // ---- past 14 days incl. today, NEWEST FIRST, diverging stacked bars ----
+  const dayKeys = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(now); d.setDate(now.getDate() - i);
+    dayKeys.push(d.getTime()); // index 0 = today
+  }
+  const lvOf = t => days.get(t) ?? emptyLevels();
+  const dayApps = new Map();
+  for (const [dateStr, rows] of Object.entries(data.day_activities ?? {})) {
+    const d = new Date(dateStr); d.setHours(0, 0, 0, 0);
+    const perLevel = {};
+    for (const [, sec, , activity, , prod] of rows ?? []) {
+      const m = (perLevel[String(prod)] ??= new Map());
+      const n = appName(activity);
+      m.set(n, (m.get(n) ?? 0) + sec);
+    }
+    for (const l of Object.keys(perLevel))
+      perLevel[l] = [...perLevel[l]].sort((a, b) => b[1] - a[1]);
+    dayApps.set(d.getTime(), perLevel);
+  }
+  const upL = ["2", "1"], downL = ["0", "-1", "-2"];
+  const order = [...upL, ...downL];
+  // Symmetric hour scale: the productive (up) and distracting (down) sides
+  // share one maximum, so bar heights are comparable across the zero line.
+  const yMax = Math.ceil(Math.max(1,
+    ...dayKeys.map(t => upL.reduce((a, l) => a + hrs(lvOf(t)[l]), 0)),
+    ...dayKeys.map(t => downL.reduce((a, l) => a + hrs(lvOf(t)[l]), 0))));
+  // Total logged hours per day, shown under each bar, rounded to whole hours
+  // (exact values live in the hover tooltip). No "h" suffix (the y axis
+  // already shows the unit) so every one of the 14 labels fits.
+  const dayTotals = dayKeys.map(t =>
+    String(Math.round(hrs(LEVELS.reduce((a, l) => a + lvOf(t)[l], 0)))));
+  // all chart text matches the 0.8rem card titles; `let` so syncChartFont
+  // below can keep it in step with the root font size after resizes
+  const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize);
+  let tickPx = Math.round(remPx() * 0.8);
+  const dayCanvas = document.getElementById("dayChart");
+  // "Total" in the bottom-right corner (under the hours scale), labelling the
+  // per-day totals row — styled like the pulse card's row labels. Reads the
+  // first x tick's actual draw position so it sits EXACTLY on the numbers row.
+  const totLabel = {
+    id: "totLabel",
+    afterDraw(chart) {
+      const { ctx } = chart;
+      const x = chart.scales.x, y = chart.scales.y;
+      // Chart.js private internals, but exact: ticks are drawn translated to
+      // options.translation then offset by textOffset. Fall back to a centred
+      // guess if the internals ever change shape.
+      const li = x._labelItems?.[0];
+      const ty = li?.options?.translation?.[1] != null
+        ? li.options.translation[1] + (li.textOffset ?? 0)
+        : x.top + x.height / 2;
+      ctx.save();
+      ctx.font = `600 ${tickPx}px -apple-system, "Segoe UI", Roboto, sans-serif`;
+      ctx.fillStyle = "#909090";
+      ctx.textAlign = "left";
+      ctx.textBaseline = li?.options?.textBaseline ?? "middle";
+      ctx.fillText("Total", y.left + 4, ty);
+      ctx.restore();
+    },
+  };
+  const dayChart = new Chart(dayCanvas, {
+    type: "bar",
+    plugins: [totLabel],
+    data: {
+      labels: dayKeys.map((t, i) => i === 0 ? "Today" : String(new Date(t).getDate())),
+      datasets: [
+        ...upL.map(l => ({ label: NAMES[l],
+          data: dayKeys.map(t => hrs(lvOf(t)[l])),
+          backgroundColor: COLORS[l], borderRadius: 2, stack: "t" })),
+        ...downL.map(l => ({ label: NAMES[l],
+          data: dayKeys.map(t => -hrs(lvOf(t)[l])),
+          backgroundColor: COLORS[l], borderRadius: 2, stack: "t" })),
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, ...NO_ANIM,
+      plugins: { legend: { display: false },
+        tooltip: { ...HTML_TOOLTIP, callbacks: {
+          title: c => c[0].dataIndex === 0 ? "Today"
+            : new Date(dayKeys[c[0].dataIndex]).toLocaleDateString(undefined,
+                { weekday: "short", day: "numeric", month: "short" }),
+          label: c => ` ${Math.abs(c.raw)}h ${c.dataset.label}`,
+          afterLabel: c => {
+            const apps = dayApps.get(dayKeys[c.dataIndex])?.[order[c.datasetIndex]] ?? [];
+            if (!apps.length) return "";
+            return apps.slice(0, 5).map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+          },
+        } } },
+      scales: {
+        x: { stacked: true, grid: { display: false },
+             // no dates (those live in the tooltip) — instead each day's total
+             // logged hours at the bottom, one label per bar (no skipping)
+             ticks: { color: "#909090", maxRotation: 0, autoSkip: false,
+                      font: { size: tickPx },
+                      callback: (v, i) => dayTotals[i] } },
+        y: { stacked: true, position: "right",  // hours on the right, like the list cards
+             min: -yMax, max: yMax,
+             // "Total" under the axis is wider than the "8h" tick labels the
+             // axis sizes itself for; reserve enough width so it never clips.
+             afterFit: s => { s.width = Math.max(s.width, Math.ceil(tickPx * 2.6) + 6); },
+             grid: { color: ctx => ctx.tick.value === 0 ? "#5a5a5a" : "#333333",
+                     lineWidth: ctx => ctx.tick.value === 0 ? 2 : 1 },
+             ticks: { color: "#909090", font: { size: tickPx },
+                      callback: v => Math.abs(v) + "h" } },
+      } },
+  });
+
+  // Keep the chart's text the SAME size as every other card's text: the root
+  // font size is vw-based (clamp), but Chart.js bakes fonts in as pixels at
+  // creation time — so after any resize recompute the pixel size and update
+  // the chart. Without this the chart text ends up smaller (or larger) than
+  // the rest of the page whenever the widget width changes after load.
+  const syncChartFont = () => {
+    const p = Math.round(remPx() * 0.8);
+    if (p === tickPx) return;
+    tickPx = p;
+    dayChart.options.scales.x.ticks.font.size = p;
+    dayChart.options.scales.y.ticks.font.size = p;
+    dayChart.update();
+  };
+  window.addEventListener("resize", syncChartFont);
+  new ResizeObserver(syncChartFont).observe(document.documentElement);
+
+  // Clicking a bar opens RescueTime's day view for that date; clicks on the
+  // empty canvas fall through to the page-wide dashboard link.
+  dayCanvas.addEventListener("click", e => {
+    const els = dayChart.getElementsAtEventForMode(e, "nearest", { intersect: true }, true);
+    if (!els.length) return;
+    e.stopPropagation();
+    window.open("https://www.rescuetime.com/dashboard/for/the/day/of/" +
+                isoOf(dayKeys[els[0].index]), "_blank", "noopener");
+  });
+
+  // =========================================================================
+  // App search card + app detail card
+  // Data source: docs/archive.json — the FULL per-day history the fetch
+  // script maintains (loaded lazily, only once the search box is touched).
+  // =========================================================================
+  const esc = s => String(s).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const searchCard = document.getElementById("searchCard");
+  const detailCard = document.getElementById("appDetailCard");
+  const inputEl = document.getElementById("appSearch");
+  const sugEl = document.getElementById("searchSug");
+  // While a detail card OR the suggestion list is open, the dashboard cards
+  // underneath are hidden (body.overlay-open in styles.css) — only the
+  // search bar and the open overlay stay visible. The observer catches
+  // EVERY open/close path (typing, click, ESC, outside click).
+  const syncOverlayState = () => document.body.classList.toggle(
+    "overlay-open", !detailCard.hidden || !sugEl.hidden);
+  const overlayMo = new MutationObserver(syncOverlayState);
+  overlayMo.observe(detailCard, { attributes: true, attributeFilter: ["hidden"] });
+  overlayMo.observe(sugEl, { attributes: true, attributeFilter: ["hidden"] });
+  // The page-wide click handler opens rescuetime.com — keep clicks inside the
+  // search card local, and let a click on the detail card CLOSE it instead.
+  searchCard.addEventListener("click", e => e.stopPropagation());
+  detailCard.addEventListener("click", e => {
+    e.stopPropagation();
+    detailCard.hidden = true;
+  });
+  // Rows carrying data-rt-url (the app card's month/year rows, the period
+  // card's total row): clicking one opens that period's RescueTime report
+  // instead of closing the card.
+  document.getElementById("appDetailRows").addEventListener("click", e => {
+    const row = e.target.closest("[data-rt-url]");
+    if (!row) return;                    // any other click still closes the card
+    e.stopPropagation();
+    window.open(row.dataset.rtUrl, "_blank", "noopener");
+  });
+  // ESC closes the detail card too (anywhere on the page)...
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !detailCard.hidden) detailCard.hidden = true;
+  });
+  // ...and so does a click OUTSIDE it. Capture phase, so the click is
+  // swallowed before any other handler — closing an overlay must not also
+  // fire the page-wide rescuetime.com link or a card's click-through.
+  document.addEventListener("click", e => {
+    const sugOpen = !sugEl.hidden, detOpen = !detailCard.hidden;
+    if (!sugOpen && !detOpen) return;
+    if (e.target.closest?.("#appDetailCard, #searchSug, #appSearch")) return;
+    if (detOpen) detailCard.hidden = true;
+    if (sugOpen) { sugList = []; renderSug(); }
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+
+  let archivePromise = null;
+  const loadArchive = () => archivePromise ??= loadJson("archive.json", null);
+  // anything with less TOTAL logged time than this never appears in the
+  // suggestions — the same floor applies to apps and periods (user request)
+  const MIN_LOGGED_SEC = 1800;   // 0.5 h
+
+  // All known apps (merged by display name) with their all-time totals —
+  // built once from the archive; falls back to the 30-day rows when the
+  // archive hasn't been generated yet.
+  let appIndexPromise = null;
+  const appIndex = () => appIndexPromise ??= loadArchive().then(arch => {
+    const idx = new Map();
+    const cutoff30 = isoOf(daysAgo(29).getTime());   // past 30 days incl. today
+    const add = (act, sec, recent) => {
+      const name = appName(act), k = name.toLowerCase();
+      const e = idx.get(k) ?? { name, total: 0, last30: 0 };
+      e.total += sec;
+      if (recent) e.last30 += sec;
+      idx.set(k, e);
+    };
+    if (arch?.days) {
+      for (const [day, rows] of Object.entries(arch.days))
+        for (const [sec, act] of rows) add(act, sec, day >= cutoff30);
+    } else {
+      for (const [, sec, , act] of data.month_activities ?? []) add(act, sec, true);
+    }
+    return [...idx.values()];
+  });
+
+  // All known CATEGORIES (merged by display name via dictionary.json) with
+  // their all-time + 30-day totals — same shape as the app index.
+  let catIndexPromise = null;
+  let catArchive = null;   // kept for the per-period category totals below
+  const catIndex = () => catIndexPromise ??= loadArchive().then(arch => {
+    catArchive = arch;
+    const idx = new Map();
+    const cutoff30 = isoOf(daysAgo(29).getTime());
+    const add = (cat, sec, recent) => {
+      const name = catName(cat), k = name.toLowerCase();
+      const e = idx.get(k) ?? { name, total: 0, last30: 0 };
+      e.total += sec;
+      if (recent) e.last30 += sec;
+      idx.set(k, e);
+    };
+    if (arch?.days) {
+      for (const [day, rows] of Object.entries(arch.days))
+        for (const [sec, , cat] of rows) add(cat, sec, day >= cutoff30);
+    } else {
+      for (const [, sec, , , cat] of data.month_activities ?? []) add(cat, sec, true);
+    }
+    return [...idx.values()];
+  });
+
+  // The five productivity TYPES (Very Productive .. Very Distracting) are
+  // searchable exactly like categories — with all-time + 30-day totals.
+  let lvlIndexPromise = null;
+  const lvlIndex = () => lvlIndexPromise ??= loadArchive().then(arch => {
+    const idx = new Map(LEVELS.map(l => [l, { lvl: l, name: NAMES[l], total: 0, last30: 0 }]));
+    const cutoff30 = isoOf(daysAgo(29).getTime());
+    if (arch?.days) {
+      for (const [day, rows] of Object.entries(arch.days))
+        for (const [sec, , , prod] of rows) {
+          const e = idx.get(String(prod));
+          if (!e) continue;
+          e.total += sec;
+          if (day >= cutoff30) e.last30 += sec;
+        }
+    } else {
+      for (const [, sec, , , , prod] of data.month_activities ?? []) {
+        const e = idx.get(String(prod));
+        if (e) { e.total += sec; e.last30 += sec; }
+      }
+    }
+    return [...idx.values()];
+  });
+
+  // total seconds ONE filter (a category display name, or "lvl:<prod>" for a
+  // productivity type) logged inside ONE period — used to show (and
+  // 0.5h-filter) the "<Filter> — <Period>" combo suggestions
+  const filterPeriodTotal = (p, key) => {
+    const lvl = key.startsWith("lvl:") ? key.slice(4) : null;
+    const hit = (cat, prod) => lvl ? String(prod) === lvl
+                                   : catName(cat).toLowerCase() === key;
+    let s = 0;
+    if (p.h24) {
+      const [b1, b0] = p.h24;
+      for (const [t, sec, , , cat, prod] of (data.hour_activities ?? [])) {
+        const ms = new Date(t).getTime();
+        if (ms > nowMs - b1 * 36e5 && ms <= nowMs - b0 * 36e5 && hit(cat, prod)) s += sec;
+      }
+    } else if (catArchive?.days) {
+      for (const [d, rows] of Object.entries(catArchive.days))
+        if (d >= p.range[0] && d <= p.range[1])
+          for (const [sec, , cat, prod] of rows) if (hit(cat, prod)) s += sec;
+    } else {
+      for (const [d, rows] of Object.entries(data.day_activities ?? {}))
+        if (d >= p.range[0] && d <= p.range[1])
+          for (const [, sec, , , cat, prod] of rows) if (hit(cat, prod)) s += sec;
+    }
+    return s;
+  };
+
+  // ---- every searchable PERIOD with its total logged seconds, built once
+  // from the archive (rows_daily as the fallback): the named windows (Today,
+  // Current 7 Days, Current Week, ...), THIS year's weeks current..1 ("Week 29"),
+  // then months ("July 2026"), years ("2026") and dates ("15 07 26", also
+  // searchable as "Date 15 7 2026" / "Day 15 7 2026") back to the start of
+  // the data — every group NEWEST FIRST. Any period with less than 0.5 h
+  // logged is dropped entirely (same floor as the apps).
+  let periodIndexPromise = null;
+  const periodIndex = () => periodIndexPromise ??= loadArchive().then(arch => {
+    // per-day TOTAL seconds: app rows where the archive has them, seeded
+    // level-only totals otherwise
+    const dayTot = new Map();
+    if (arch?.days || arch?.day_levels) {
+      for (const [d, rows] of Object.entries(arch.days ?? {}))
+        dayTot.set(d, rows.reduce((s, r) => s + r[0], 0));
+      for (const [d, lv] of Object.entries(arch.day_levels ?? {}))
+        dayTot.set(d, Object.values(lv).reduce((s, x) => s + x, 0));
+    } else {
+      for (const [date, sec] of data.rows_daily ?? []) {
+        const d = date.slice(0, 10);
+        dayTot.set(d, (dayTot.get(d) ?? 0) + sec);
+      }
+    }
+    const sumTot = ([a, b]) => { let s = 0;
+      for (const [d, sec] of dayTot) if (d >= a && d <= b) s += sec;
+      return s; };
+    const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+    const isoD = d => isoOf(d.getTime());
+    const ddmmyy = iso => `${iso.slice(8, 10)} ${iso.slice(5, 7)} ${iso.slice(2, 4)}`;
+    const RT = "https://www.rescuetime.com/dashboard/for/the/";
+    const out = [];
+    let prio = 0;   // insertion order = tie-break order in the suggestions
+    // Periods under the 0.5 h floor never become searchable (user request —
+    // strict, applies to EVERY period kind and to apps alike).
+    // alt = extra searchable names for the same period ("Date 15 7 2026").
+    const push = (label, range, prevLabel, prevRange, rtUrl, alt) => {
+      const total = sumTot(range);
+      if (total >= MIN_LOGGED_SEC)
+        out.push({ label, range, prevLabel, prevRange,
+                   prevTotal: sumTot(prevRange),
+                   rtUrl: rtUrl ?? null, alt: alt ?? null, total, prio });
+      prio++;
+    };
+    const dayPair = d => [isoD(d), isoD(d)];
+    const ws = weekStart(now), ms = monthStart(now);
+    const pm = new Date(ms); pm.setMonth(pm.getMonth() - 1);
+    const ppm = new Date(ms); ppm.setMonth(ppm.getMonth() - 2);
+    const ys = new Date(now.getFullYear(), 0, 1);
+    const pys = new Date(now.getFullYear() - 1, 0, 1);
+    // rolling 24-hour windows come from the HOURLY rows, not day totals
+    const hourRows = data.hour_activities ?? [];
+    const sumH24 = ([back1, back0]) => {   // (now-back1 h, now-back0 h]
+      let s = 0;
+      for (const [t, sec] of hourRows) {
+        const ms = new Date(t).getTime();
+        if (ms > nowMs - back1 * 36e5 && ms <= nowMs - back0 * 36e5) s += sec;
+      }
+      return s;
+    };
+    const pushH24 = (label, win, prevLabel, prevWin) => {
+      const total = sumH24(win);
+      if (total >= MIN_LOGGED_SEC)
+        out.push({ label, h24: win, prevH24: prevWin, prevLabel,
+                   range: null, prevRange: null, prevTotal: sumH24(prevWin),
+                   rtUrl: null, alt: null, total, prio });
+      prio++;
+    };
+    // the named windows first — they win suggestion-order ties. Every period
+    // has a CURRENT and a PRIOR (rolling) / PAST (calendar) equivalent:
+    // Current X = the last X ending now/today, Prior X = the X before that.
+    push("Today", dayPair(now), "Yesterday", dayPair(addD(now, -1)),
+         RT + "day/of/" + isoD(now));
+    push("Yesterday", dayPair(addD(now, -1)), ddmmyy(isoD(addD(now, -2))),
+         dayPair(addD(now, -2)), RT + "day/of/" + isoD(addD(now, -1)));
+    pushH24("Current 24 Hours", [24, 0], "Prior 24 Hours", [48, 24]);
+    pushH24("Prior 24 Hours", [48, 24], "24 Hours Before", [72, 48]);
+    push("Current 7 Days", [isoD(addD(now, -6)), isoD(now)],
+         "Prior 7 Days", [isoD(addD(now, -13)), isoD(addD(now, -7))], null);
+    push("Prior 7 Days", [isoD(addD(now, -13)), isoD(addD(now, -7))],
+         "7 Days Before", [isoD(addD(now, -20)), isoD(addD(now, -14))], null);
+    push("Current 14 Days", [isoD(addD(now, -13)), isoD(now)],
+         "Prior 14 Days", [isoD(addD(now, -27)), isoD(addD(now, -14))], null);
+    push("Prior 14 Days", [isoD(addD(now, -27)), isoD(addD(now, -14))],
+         "14 Days Before", [isoD(addD(now, -41)), isoD(addD(now, -28))], null);
+    push("Current 30 Days", [isoD(addD(now, -29)), isoD(now)],
+         "Prior 30 Days", [isoD(addD(now, -59)), isoD(addD(now, -30))], null);
+    push("Prior 30 Days", [isoD(addD(now, -59)), isoD(addD(now, -30))],
+         "30 Days Before", [isoD(addD(now, -89)), isoD(addD(now, -60))], null);
+    push("Current Week", [isoD(ws), isoD(now)],
+         "Past Week", [isoD(addD(ws, -7)), isoD(addD(ws, -1))],
+         RT + "week/of/" + isoD(now));
+    push("Past Week", [isoD(addD(ws, -7)), isoD(addD(ws, -1))],
+         "Week Before", [isoD(addD(ws, -14)), isoD(addD(ws, -8))],
+         RT + "week/of/" + isoD(addD(ws, -7)));
+    push("Current Month", [isoD(ms), isoD(now)],
+         "Past Month", [isoD(pm), isoD(addD(ms, -1))],
+         RT + "month/of/" + isoD(ms));
+    push("Past Month", [isoD(pm), isoD(addD(ms, -1))],
+         "Month Before", [isoD(ppm), isoD(addD(pm, -1))],
+         RT + "month/of/" + isoD(pm));
+    push("Current Year", [isoD(ys), isoD(now)],
+         "Past Year", [isoD(pys), isoD(addD(ys, -1))],
+         RT + "year/of/" + isoD(ys));
+    push("Past Year", [isoD(pys), isoD(addD(ys, -1))],
+         "Year Before", [isoD(new Date(now.getFullYear() - 2, 0, 1)), isoD(addD(pys, -1))],
+         RT + "year/of/" + isoD(pys));
+    // calendar weeks of THIS year only, the current week DOWN to Week 1 —
+    // so "week" suggests the current week first, then last week, ...
+    for (let s = weekStart(now), w1 = weekStart(new Date(now.getFullYear(), 0, 4));
+         s >= w1; s = addD(s, -7)) {   // ISO week 1 holds Jan 4
+      const ps = addD(s, -7);
+      push(`Week ${isoWeekNum(s)}`, [isoD(s), isoD(addD(s, 6))],
+           `Week ${isoWeekNum(ps)}`, [isoD(ps), isoD(addD(ps, 6))],
+           RT + "week/of/" + isoD(s));
+    }
+    const first = [...dayTot.keys()].sort()[0];
+    if (first) {
+      // calendar months, newest first, back to the START OF THE DATA — a
+      // month name suggests that month across EVERY year with data
+      // ("January" -> January 2026, January 2025, ...); the 0.5 h floor
+      // still hides empty months
+      const monLbl = d => {
+        const s = d.toLocaleDateString(undefined, { month: "long" });
+        return s.charAt(0).toUpperCase() + s.slice(1) + " " + d.getFullYear();
+      };
+      for (let s = new Date(ms); isoD(new Date(s.getFullYear(), s.getMonth() + 1, 0)) >= first;
+           s.setMonth(s.getMonth() - 1)) {
+        const ps = new Date(s.getFullYear(), s.getMonth() - 1, 1);
+        push(monLbl(s), [isoD(s), isoD(new Date(s.getFullYear(), s.getMonth() + 1, 0))],
+             monLbl(ps), [isoD(ps), isoD(new Date(s.getFullYear(), s.getMonth(), 0))],
+             RT + "month/of/" + isoD(s));
+      }
+      // calendar years, newest first ("2026")
+      for (let y = now.getFullYear(); y >= +first.slice(0, 4); y--) {
+        push(String(y), [isoD(new Date(y, 0, 1)), isoD(new Date(y, 11, 31))],
+             String(y - 1), [isoD(new Date(y - 1, 0, 1)), isoD(new Date(y - 1, 11, 31))],
+             RT + "year/of/" + y + "-01-01");
+      }
+      // single dates, newest first — label "15 07 26" (typing "15 07"
+      // matches that DD MM across EVERY year with data). ALSO searchable via
+      // "Date"/"Day" + day month year in ANY padding — "Day 15 7 2026",
+      // "Day 15 07 2026", "Date 05 07 2026", ... — so a partially typed
+      // "Day 20 0" keeps suggesting instead of going dead.
+      for (const d of [...dayTot.keys()].sort().reverse()) {
+        const pd = isoD(addD(new Date(d + "T00:00:00"), -1));
+        const y = d.slice(0, 4), mP = d.slice(5, 7), dP = d.slice(8, 10);
+        const alts = new Set();
+        for (const dd of new Set([String(+dP), dP]))
+          for (const mm of new Set([String(+mP), mP]))
+            for (const w of ["Date", "Day"])
+              alts.add(`${w} ${dd} ${mm} ${y}`);
+        push(ddmmyy(d), [d, d], ddmmyy(pd), [pd, pd], RT + "day/of/" + d, [...alts]);
+      }
+    }
+    return out;
+  });
+
+  // Match TIER — 2: the name STARTS with the query, 1: it merely CONTAINS
+  // it, -1: no match (never fuzzy — typing "un" only surfaces names with
+  // "un" actually in them). Ranking uses the tier ALONE; within a tier the
+  // caller's own order decides — periods keep the index's newest-first order
+  // (so "week" puts the CURRENT week on top, then last week, ...), apps
+  // order by logged hours.
+  function matchTier(q, name) {
+    q = q.toLowerCase(); const n = name.toLowerCase();
+    if (!q) return -1;
+    const i = n.indexOf(q);
+    return i === 0 ? 2 : i > 0 ? 1 : -1;
+  }
+
+  // The suggestion list has three groups — PERIODS on top, then CATEGORIES
+  // (incl. productivity types), then APPS — each introduced by a labelled
+  // .sug-head so the group kind is obvious at a glance (user request; the
+  // bare divider lines said nothing). Entries under the 0.5 h floor never
+  // appear in any group.
+  let sugList = [], sugIdx = -1;   // {kind:"period",p} | {kind:"cat",c,p,...} | {kind:"app",a}
+  function renderSug() {
+    if (!sugList.length) { sugEl.hidden = true; sugEl.innerHTML = ""; return; }
+    sugEl.hidden = false;
+    sugEl.innerHTML = sugList.map((s, i) => {
+      const open = `<div class="sug-row${i === sugIdx ? " active" : ""}" data-i="${i}">`;
+      const row = s.kind === "period"
+        // periods: label left, the period's logged hours right
+        ? `${open}
+             <span class="sug-name">${esc(s.p.label)}</span>
+             <span class="sug-hours"></span>
+             <span class="sug-hours">${hrs(s.p.total)}h <span class="sug-unit">Logged</span></span>
+           </div>`
+        : s.kind === "cat"
+        // categories: bare name (opens Current 30 Days) shows 30d + total;
+        // a "<Category> — <Period>" combo shows that period's hours
+        ? (s.bare
+          ? `${open}
+               <span class="sug-name">${esc(s.c.name)}</span>
+               <span class="sug-hours">${hrs(s.c.last30)}h <span class="sug-unit">30d</span></span>
+               <span class="sug-hours">${hrs(s.c.total)}h <span class="sug-unit">Total</span></span>
+             </div>`
+          : `${open}
+               <span class="sug-name">${esc(s.label)}</span>
+               <span class="sug-hours"></span>
+               <span class="sug-hours">${hrs(s.sec)}h <span class="sug-unit">Logged</span></span>
+             </div>`)
+        // apps: name left; past-30-days and all-time hours right
+        : `${open}
+             <span class="sug-name">${esc(s.a.name)}</span>
+             <span class="sug-hours">${hrs(s.a.last30)}h <span class="sug-unit">30d</span></span>
+             <span class="sug-hours">${hrs(s.a.total)}h <span class="sug-unit">Total</span></span>
+           </div>`;
+      const heads = { period: "Periods", cat: "Categories &amp; Types", app: "Apps" };
+      return (i === 0 || s.kind !== sugList[i - 1].kind
+              ? `<div class="sug-head">${heads[s.kind]}</div>` : "") + row;
+    }).join("");
+  }
+  async function updateSug() {
+    const q = inputEl.value.trim();
+    if (!q) { sugList = []; sugIdx = -1; renderSug(); return; }
+    const [apps, periods, cats, lvls] =
+      await Promise.all([appIndex(), periodIndex(), catIndex(), lvlIndex()]);
+    // periods: starts-with beats contains, then the index's own newest-first
+    // order; alt names ("Date 15 7 2026") match like the label
+    const tierOf = (query, p) => Math.max(matchTier(query, p.label),
+                                          ...(p.alt ?? []).map(a => matchTier(query, a)));
+    const perAll = periods
+      .map(p => [tierOf(q, p), p])
+      .filter(([t]) => t > 0)
+      .sort((x, y) => y[0] - x[0] || x[1].prio - y[1].prio)
+      .map(([, p]) => ({ kind: "period", p }));
+    // categories AND productivity types: a plain name opens the DEFAULT
+    // window (Current 30 Days); "<name> <period>" opens exactly that period
+    const defP = periods.find(p => p.label === "Current 30 Days") ?? {
+      label: "Current 30 Days",
+      range: [isoOf(daysAgo(29).getTime()), isoOf(now.getTime())],
+      prevLabel: "Prior 30 Days",
+      prevRange: [isoOf(daysAgo(59).getTime()), isoOf(daysAgo(30).getTime())],
+      total: 0, prevTotal: 0, rtUrl: null,
+    };
+    const cat = [];
+    const ql = q.toLowerCase();
+    // filterables = categories (key = lowercased name) + types (key = lvl:N)
+    const filterables = [
+      ...cats.map(c => ({ c, key: c.name.toLowerCase() })),
+      ...lvls.map(c => ({ c, key: "lvl:" + c.lvl })),
+    ];
+    for (const { c, key } of filterables) {
+      if (c.total < MIN_LOGGED_SEC) continue;
+      if (matchTier(q, c.name) > 0)
+        cat.push({ kind: "cat", c, key, p: defP, bare: true, sec: c.total });
+      const cn = c.name.toLowerCase();
+      if (!ql.startsWith(cn + " ")) continue;
+      const rest = q.slice(cn.length + 1).trim();
+      if (!rest) continue;
+      const combos = periods
+        .map(p => [tierOf(rest, p), p])
+        .filter(([t]) => t > 0)
+        .sort((x, y) => y[0] - x[0] || x[1].prio - y[1].prio)
+        .slice(0, 5);
+      for (const [, p] of combos) {
+        const sec = filterPeriodTotal(p, key);
+        if (sec >= MIN_LOGGED_SEC)
+          cat.push({ kind: "cat", c, key, p, bare: false,
+                     label: `${c.name} — ${p.label}`, sec });
+      }
+    }
+    const catAll = cat.sort((x, y) => y.sec - x.sec);
+    // apps (≥0.5 h total): the contains-match FILTERS; the ORDER is by hours
+    const appAll = apps
+      .filter(a => a.total >= MIN_LOGGED_SEC && matchTier(q, a.name) > 0)
+      .sort((x, y) => y.total - x.total || y.last30 - x.last30)
+      .map(a => ({ kind: "app", a }));
+    // ALWAYS fill up to 20 suggestions: the 5-per-group caps for periods and
+    // categories only bite while the TOTAL would exceed 20 — leftover slots
+    // go back to periods first ("week" alone shows the last 20 weeks),
+    // then categories/types, then apps.
+    let nPer = Math.min(5, perAll.length),
+        nCat = Math.min(5, catAll.length);
+    let nApp = Math.min(appAll.length, 20 - nPer - nCat);
+    let free = 20 - nPer - nCat - nApp;
+    const morePer = Math.min(free, perAll.length - nPer);
+    nPer += morePer; free -= morePer;
+    nCat += Math.min(free, catAll.length - nCat);
+    sugList = [...perAll.slice(0, nPer), ...catAll.slice(0, nCat), ...appAll.slice(0, nApp)];
+    sugIdx = sugList.length ? 0 : -1;
+    renderSug();
+  }
+  function openSug(i) {
+    const s = sugList[i];
+    if (!s) return;
+    inputEl.value = s.kind === "period" ? s.p.label
+      : s.kind === "cat" ? (s.bare ? s.c.name : s.label)
+      : s.a.name;
+    sugList = []; renderSug();
+    if (s.kind === "period") showPeriodDetail(s.p);
+    else if (s.kind === "cat") showPeriodDetail(s.p, s.key, s.c.name);
+    else showAppDetail(s.a.name);
+  }
+  inputEl.addEventListener("input", updateSug);
+  inputEl.addEventListener("focus", () => loadArchive());  // warm the cache
+  inputEl.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!sugList.length) return;
+      sugIdx = (sugIdx + (e.key === "ArrowDown" ? 1 : -1) + sugList.length) % sugList.length;
+      renderSug();
+    } else if (e.key === "Enter") {
+      if (sugIdx >= 0) openSug(sugIdx);
+    } else if (e.key === "Escape") {
+      sugList = []; renderSug();
+    }
+  });
+  sugEl.addEventListener("click", e => {
+    const r = e.target.closest(".sug-row");
+    if (r) openSug(+r.dataset.i);
+  });
+
+  // ---- the detail card: hours for ONE app across every period, with the
+  //      trend vs the immediately preceding period of the same length ----
+  async function showAppDetail(displayName) {
+    const arch = await loadArchive();
+    // Per-APP history starts where the archive has actual per-app rows (the
+    // seeded archive also carries older level-only days that can't answer
+    // per-app questions — those must not count as available history).
+    const appDayKeys = Object.keys(arch?.days ?? {}).sort();
+    const histStart = appDayKeys[0] ?? data.history_start ?? null;
+    const key = displayName.toLowerCase();
+    // per-day seconds for this app (merged by display name)
+    const perDay = new Map();
+    for (const [d, rows] of Object.entries(arch?.days ?? {}))
+      for (const [sec, act] of rows)
+        if (appName(act).toLowerCase() === key)
+          perDay.set(d, (perDay.get(d) ?? 0) + sec);
+    const sum = (a, b) => {   // inclusive ISO-string range
+      let s = 0;
+      for (const [d, sec] of perDay) if (d >= a && d <= b) s += sec;
+      return s;
+    };
+    const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+    const isoD = d => isoOf(d.getTime());
+    const todayIso = isoD(now);
+    const ws = weekStart(now);
+    const ms = monthStart(now);
+    const pm = new Date(ms); pm.setMonth(pm.getMonth() - 1);
+    const ys = new Date(now.getFullYear(), 0, 1);
+    const pys = new Date(now.getFullYear() - 1, 0, 1);
+    // One LINE per pair: current period | trend | previous period.
+    // Calendar pairs are interleaved with the ROLLING windows — "Past 24
+    // Hours" comes from the hourly rows (the same acts24/actsPrev24 the
+    // pulse card uses), "Past 7/30 Days" from the per-day archive.
+    const sumH = rows => { let s = 0;
+      for (const [, sec, , act] of rows) if (appName(act).toLowerCase() === key) s += sec;
+      return s; };
+    const hasHourly = (data.hour_activities ?? []).length > 0;
+    const H24 = { h24cur:  hasHourly ? sumH(acts24)     : null,
+                  h24prev: hasHourly ? sumH(actsPrev24) : null };
+    const lines = [
+      ["Today",      [todayIso, todayIso],
+       "Yesterday",  [isoD(addD(now, -1)), isoD(addD(now, -1))]],
+      ["Current 24 Hours", "h24cur",       // rolling, hourly data (last ~48 h)
+       "Prior 24 Hours", "h24prev"],
+      ["This Week",  [isoD(ws), todayIso],
+       "Past Week",  [isoD(addD(ws, -7)), isoD(addD(ws, -1))]],
+      ["Current 7 Days",  [isoD(addD(now, -6)), todayIso],
+       "Prior 7 Days", [isoD(addD(now, -13)), isoD(addD(now, -7))]],
+      ["This Month", [isoD(ms), todayIso],
+       "Past Month", [isoD(pm), isoD(addD(ms, -1))]],
+      ["Current 30 Days",  [isoD(addD(now, -29)), todayIso],
+       "Prior 30 Days", [isoD(addD(now, -59)), isoD(addD(now, -30))]],
+      ["This Year",  [isoD(ys), todayIso],
+       "Past Year",  [isoD(pys), isoD(addD(ys, -1))]],
+    ];
+    // null = the whole period predates the archive's app history — or, for
+    // the 24h windows, data.json carries no hourly rows at all
+    const cellVal = r => typeof r === "string" ? H24[r]
+      : (histStart && r[1] < histStart) ? null : sum(r[0], r[1]);
+    const spanText = (L, r) => typeof r === "string"
+      ? `${L}: Rolling Window (Hourly Data)`
+      : `${L}: ${r[0] === r[1] ? r[0] : r[0] + " — " + r[1]}`;
+    const fmtCell = v => v === null
+      ? `<div class="app-hours app-na">Not Available</div>`
+      : `<div class="app-hours">${hrs(v)}h</div>`;
+    const rows = lines.map(([curL, curR, prevL, prevR]) => {
+      const cur = cellVal(curR), prev = cellVal(prevR);
+      let trend = "", tipTrend = "No Comparison Available";
+      if (cur !== null && prev !== null && (cur || prev)) {
+        const dHrs = hrs(cur - prev);
+        const up = dHrs >= 0;
+        const pct = prev ? Math.round(100 * cur / prev) : null;
+        trend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
+                 ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
+        tipTrend = `${curL} Is ${up ? "+" : ""}${dHrs}h Vs ${prevL}` +
+                   (pct !== null ? ` (${pct}%)` : "");
+      }
+      const partial = histStart &&
+        ((cur !== null && Array.isArray(curR) && curR[0] < histStart) ||
+         (prev !== null && Array.isArray(prevR) && prevR[0] < histStart));
+      const tipBody =
+        spanText(curL, curR) + "\n" + spanText(prevL, prevR) + "\n" +
+        (partial ? `Partial — App History Starts ${histStart}\n` : "") + tipTrend;
+      return `<div class="app-period-row" data-tip-title="${esc(curL)} Vs ${esc(prevL)}"
+                data-tip-body="${esc(tipBody)}">
+                <div class="row-label">${curL}</div>${fmtCell(cur)}
+                <div class="app-trend">${trend}</div>
+                <div class="row-label">${prevL}</div>${fmtCell(prev)}</div>`;
+    });
+    const total = sum(histStart ?? "0000-01-01", todayIso);
+    rows.push(`<div class="app-period-row" data-tip-title="Total: ${hrs(total)}h"
+      data-tip-body="${esc("All Recorded Data" + (histStart ? ` Since ${histStart}` : ""))}">
+      <div class="row-label">Total</div>
+      <div class="app-hours">${hrs(total)}h</div>
+      <div class="app-trend app-since">${histStart ? `Since ${esc(histStart)}` : ""}</div>
+      <div class="row-label"></div><div class="app-hours"></div></div>`);
+
+    // ---- one row per SPECIFIC month (past 12) and per YEAR back to the
+    //      start of the data, each with the trend vs the period before it ----
+    // url: clicking the row opens that period's RescueTime report in a new tab
+    const statRow = (label, range, prevRange, prevLabel, url) => {
+      const v = cellVal(range);
+      let trend = "", tipTrend = "No Comparison Available";
+      if (v !== null && prevRange) {
+        const pv = cellVal(prevRange);
+        if (pv !== null && (v || pv)) {
+          const dHrs = hrs(v - pv);
+          const up = dHrs >= 0;
+          const pct = pv ? Math.round(100 * v / pv) : null;
+          trend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
+                   ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
+          tipTrend = `${up ? "+" : ""}${dHrs}h Vs ${prevLabel}` +
+                     (pct !== null ? ` (${pct}%)` : "");
+        }
+      }
+      const partial = histStart && v !== null && range[0] < histStart;
+      const tipBody = `${range[0]} — ${range[1]}` +
+        (partial ? `\nPartial — App History Starts ${histStart}` : "") + `\n${tipTrend}` +
+        (url ? "\nClick To Open This Period On RescueTime" : "");
+      return `<div class="app-stat-row"${url ? ` data-rt-url="${esc(url)}"` : ""}
+                data-tip-title="${esc(label)}: ${v === null ? "Not Available" : hrs(v) + "h"}"
+                data-tip-body="${esc(tipBody)}">
+                <div class="row-label">${label}</div>${fmtCell(v)}
+                <div class="app-trend">${trend}</div></div>`;
+    };
+    const monLabel = d => {   // month name only — the past 12 months are unambiguous
+      const s = d.toLocaleDateString(undefined, { month: "long" });
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    };
+    // months in the FIRST column, years in the SECOND, side by side
+    const monthRows = [];
+    for (let i = 0; i < 12; i++) {
+      const s  = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const e  = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      const ps = new Date(now.getFullYear(), now.getMonth() - i - 1, 1);
+      const pe = new Date(now.getFullYear(), now.getMonth() - i, 0);
+      monthRows.push(statRow(monLabel(s), [isoD(s), isoD(i === 0 ? now : e)],
+                             [isoD(ps), isoD(pe)], monLabel(ps),
+                             "https://www.rescuetime.com/dashboard/for/the/month/of/" + isoD(s)));
+    }
+    const yearRows = [];
+    const startYear = histStart ? +histStart.slice(0, 4) : now.getFullYear();
+    for (let y = now.getFullYear(); y >= startYear; y--) {
+      const s = new Date(y, 0, 1);
+      const e = y === now.getFullYear() ? now : new Date(y, 11, 31);
+      const prev = y - 1 >= startYear
+        ? [isoD(new Date(y - 1, 0, 1)), isoD(new Date(y - 1, 11, 31))] : null;
+      yearRows.push(statRow(String(y), [isoD(s), isoD(e)], prev, String(y - 1),
+                            `https://www.rescuetime.com/dashboard/for/the/year/of/${y}-01-01`));
+    }
+    rows.push(`<div class="app-cols">
+      <div class="app-col"><div class="app-sec">Past 12 Months</div>${monthRows.join("")}</div>
+      <div class="app-col"><div class="app-sec">Years</div>${yearRows.join("")}</div>
+    </div>`);
+    // ---- ORIGINAL RescueTime names the dictionary combines into this app
+    // (up to 5, all-time hours, standard bar rows) — only shown when the
+    // dictionary actually renames/merges something ----
+    const rawAgg = new Map();   // raw activity -> {sec, top, prod}
+    const addRaw = (act, sec, prod) => {
+      if (appName(act).toLowerCase() !== key) return;
+      const e = rawAgg.get(act) ?? { sec: 0, top: 0, prod: String(prod) };
+      e.sec += sec;
+      if (sec > e.top) { e.top = sec; e.prod = String(prod); }
+      rawAgg.set(act, e);
+    };
+    if (arch?.days) {
+      for (const dayRows of Object.values(arch.days))
+        for (const [sec, act, , prod] of dayRows) addRaw(act, sec, prod);
+    } else {
+      for (const [, sec, , act, , prod] of data.month_activities ?? []) addRaw(act, sec, prod);
+    }
+    const raws = [...rawAgg.entries()].sort((a, b) => b[1].sec - a[1].sec);
+    const isMerged = raws.length > 1 || (raws.length === 1 && raws[0][0] !== displayName);
+    if (isMerged)
+      rows.push(`<div class="period-apps"><div class="app-sec">Combined Original Names</div>
+        <div class="bar-list" id="appRawList"></div></div>`);
+    document.getElementById("appDetailTitle").textContent =
+      `${displayName} — Hours Logged`;
+    // How recent the fetched data goes, anchored right on the title row.
+    const fetchedAt = arch?.updated_at ?? data.generated_at;
+    const lastDay = appDayKeys[appDayKeys.length - 1];
+    document.getElementById("appDetailFresh").textContent = fetchedAt
+      ? `Data Up To ${new Date(fetchedAt).toLocaleString()}`
+      : lastDay ? `Data Up To ${lastDay}` : "No Data";
+    document.getElementById("appDetailRows").innerHTML = rows.join("");
+    if (isMerged)
+      renderBarList("appRawList", raws.slice(0, 5).map(([raw, e]) =>
+        [raw, e.sec, e.prod,
+         `Original RescueTime Name — Renamed To ${displayName}\n` +
+         `${hrs(e.sec)}h Across All Recorded Data`]));
+    detailCard.hidden = false;
+  }
+
+  // ---- the PERIOD detail card: same overlay as the app card — total logged
+  //      time with the trend vs the previous period, then the top 20 apps in
+  //      the same bar-list style as the dashboard's Top Apps cards.
+  //      catKey/catDisplay (optional): restrict everything to ONE category
+  //      (by display name) — that turns this into the CATEGORY detail card. ----
+  async function showPeriodDetail(p, catKey, catDisplay) {
+    const arch = await loadArchive();
+    // per-day app rows in the archive's compact shape [sec, act, cat, prod];
+    // data.json's 30-day day_activities is the fallback without an archive
+    const rowsOf = iso => arch?.days?.[iso]
+      ?? (data.day_activities?.[iso] ?? []).map(([, sec, , act, cat, prod]) => [sec, act, cat, prod]);
+    // catKey filters by CATEGORY display name — or, with the "lvl:<prod>"
+    // form, by ONE exact productivity type (Productive ≠ Very Productive)
+    const lvlKey = catKey?.startsWith("lvl:") ? catKey.slice(4) : null;
+    const inCat = (cat, prod) => !catKey
+      || (lvlKey ? String(prod) === lvlKey
+                 : catName(cat).toLowerCase() === catKey);
+    // ONE combined pass per window: per-app totals + per-level totals/apps +
+    // the window's total. Day windows walk the date range; the 24h windows
+    // (p.h24/p.prevH24 = [hoursBack1, hoursBack0]) filter the hourly rows.
+    const winAgg = (range, h24) => {
+      const m = new Map(), lv = emptyLevels(), apps = {};
+      const rawCats = new Map();   // raw category -> {sec, top, prod}
+      const add = (sec, act, cat, prod) => {
+        if (!inCat(cat, prod)) return;
+        const name = appName(act), k = name.toLowerCase();
+        const e = m.get(k) ?? { name, sec: 0, top: 0, cat, prod: String(prod) };
+        e.sec += sec;
+        if (sec > e.top) { e.top = sec; e.cat = cat; e.prod = String(prod); }
+        m.set(k, e);
+        const l = String(prod);
+        lv[l] += sec;
+        const lm = (apps[l] ??= new Map());
+        lm.set(name, (lm.get(name) ?? 0) + sec);
+        const rc = rawCats.get(cat) ?? { sec: 0, top: 0, prod: l };
+        rc.sec += sec;
+        if (sec > rc.top) { rc.top = sec; rc.prod = l; }
+        rawCats.set(cat, rc);
+      };
+      if (h24) {
+        const [back1, back0] = h24;
+        for (const [t, sec, , act, cat, prod] of (data.hour_activities ?? [])) {
+          const ms = new Date(t).getTime();
+          if (ms > nowMs - back1 * 36e5 && ms <= nowMs - back0 * 36e5)
+            add(sec, act, cat, prod);
+        }
+      } else {
+        for (const d = new Date(range[0] + "T00:00:00"); ; d.setDate(d.getDate() + 1)) {
+          const iso = isoOf(d.getTime());
+          if (iso > range[1]) break;
+          for (const [sec, act, cat, prod] of rowsOf(iso)) add(sec, act, cat, prod);
+        }
+      }
+      let total = 0;
+      for (const e of m.values()) total += e.sec;
+      return { m, lv, apps, total, rawCats };
+    };
+    const cur = winAgg(p.range, p.h24), prev = winAgg(p.prevRange, p.prevH24);
+    const agg = cur.m, prevAgg = prev.m;
+    const curA = cur, prevA = prev;
+    // with a category filter the totals are the CATEGORY's, not the period's
+    const totalSec = catKey ? cur.total : p.total;
+    const prevTotSec = catKey ? prev.total : p.prevTotal;
+    const rangeText = r => !r ? "" : r[0] === r[1] ? r[0] : `${r[0]} — ${r[1]}`;
+    const winText = (r, h24) => h24
+      ? (h24[1] === 0 ? "Rolling Last 24 Hours (Hourly Data)"
+                      : `${h24[1]}–${h24[0]} Hours Ago (Hourly Data)`)
+      : rangeText(r);
+    // total row: logged hours | trend | the previous period's hours
+    let trend = "", tipTrend = "No Comparison Available";
+    if (totalSec || prevTotSec) {
+      const dHrs = hrs(totalSec - prevTotSec);
+      const up = dHrs >= 0;
+      const pct = prevTotSec ? Math.round(100 * totalSec / prevTotSec) : null;
+      trend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
+               ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
+      tipTrend = `${p.label} Is ${up ? "+" : ""}${dHrs}h Vs ${p.prevLabel}` +
+                 (pct !== null ? ` (${pct}%)` : "");
+    }
+    const tipBody = (catDisplay ? `${catDisplay} Only\n` : "") +
+      `${p.label}: ${winText(p.range, p.h24)}\n` +
+      `${p.prevLabel}: ${winText(p.prevRange, p.prevH24)}\n` + tipTrend +
+      (p.rtUrl ? "\nClick To Open This Period On RescueTime" : "");
+    // ---- Productive / Neutral / Distracting rows: a stacked level bar +
+    // hours for the CURRENT period (left) and the PREVIOUS one (right),
+    // all six bars sharing ONE scale so lengths are comparable ----
+    const BUCKETS = [
+      ["Productive",  ["2", "1"],   "Very Productive + Productive"],
+      ["Neutral",     ["0"],        "Neutral"],
+      ["Distracting", ["-1", "-2"], "Distracting + Very Distracting"],
+    ];
+    const sumLv = (A, levels) => levels.reduce((s, l) => s + A.lv[l], 0);
+    const maxSec = Math.max(1, ...BUCKETS.flatMap(([, levels]) =>
+      [sumLv(curA, levels), sumLv(prevA, levels)]));
+    // One cell = "Xh Word" text with the stacked bar running UNDERNEATH it.
+    // side = span-l (current period, grid cols 1-2) | span-r (previous, 4-5).
+    const lvlCell = (A, levels, sec, word, side) => {
+      const segs = levels.map(l =>
+        `<div class="seg" style="flex:${A.lv[l]} 1 0;background:${COLORS[l]}"></div>`).join("");
+      return `<div class="cat-row lvl-cell ${side}">
+          <div class="cat-bar stackbar" style="width:${(100 * sec / maxSec).toFixed(1)}%">${segs}</div>
+          <div class="cat-label"><span class="cat-time">${hrs(sec)}h</span><span class="cat-name">${esc(word)}</span></div>
+        </div>`;
+    };
+    // barless variant of the same cell, for the Total Logged row
+    const textCell = (secH, word, side) =>
+      `<div class="cat-row lvl-cell ${side}">
+         <div class="cat-label"><span class="cat-time">${secH}h</span><span class="cat-name">${esc(word)}</span></div>
+       </div>`;
+    // the level rows make no sense for a single CATEGORY — period cards only
+    const bucketRows = catKey ? [] : BUCKETS.map(([label, levels, lvNames]) => {
+      const cur = sumLv(curA, levels), prev = sumLv(prevA, levels);
+      let bTrend = "", bTip = "No Comparison Available";
+      if (cur || prev) {
+        const dHrs = hrs(cur - prev);
+        const up = dHrs >= 0;
+        const pct = prev ? Math.round(100 * cur / prev) : null;
+        bTrend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
+                  ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
+        bTip = `${up ? "+" : ""}${dHrs}h Vs ${p.prevLabel}` +
+               (pct !== null ? ` (${pct}%)` : "");
+      }
+      // top 5 apps of this bucket in the CURRENT period, for the tooltip
+      const m = new Map();
+      for (const l of levels)
+        for (const [n, s] of curA.apps[l] ?? []) m.set(n, (m.get(n) ?? 0) + s);
+      const tops = [...m].sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+      return `<div class="app-period-row"
+          data-tip-title="${esc(label)}: ${hrs(cur)}h Vs ${hrs(prev)}h (${esc(p.prevLabel)})"
+          data-tip-body="${esc(lvNames + "\n" + bTip + (tops ? "\n" + tops : ""))}">
+          ${lvlCell(curA, levels, cur, label, "span-l")}
+          <div class="app-trend">${bTrend}</div>
+          ${lvlCell(prevA, levels, prev, label, "span-r")}</div>`;
+    });
+    // ---- ORIGINAL RescueTime category names the dictionary combines into
+    // this category (up to 5, this period's hours) — CATEGORY cards only,
+    // and only when the dictionary actually renames/merges something ----
+    const rawCatRows = (catKey && !lvlKey)
+      ? [...cur.rawCats.entries()].sort((a, b) => b[1].sec - a[1].sec)
+      : [];
+    const catMerged = rawCatRows.length > 1 ||
+      (rawCatRows.length === 1 && rawCatRows[0][0] !== catDisplay);
+    const rows = [
+      `<div class="app-period-row"${p.rtUrl ? ` data-rt-url="${esc(p.rtUrl)}"` : ""}
+         data-tip-title="${esc(catDisplay ? catDisplay + " — " : "")}${esc(p.label)}: ${hrs(totalSec)}h Logged"
+         data-tip-body="${esc(tipBody)}">
+         ${textCell(hrs(totalSec), "Total Logged", "span-l")}
+         <div class="app-trend">${trend}</div>
+         ${textCell(hrs(prevTotSec), p.prevLabel, "span-r")}</div>`,
+      ...bucketRows,
+      `<div class="period-apps"><div class="app-sec">Top 20 Apps</div>
+         <div class="bar-list" id="periodApps"></div></div>`,
+      ...(catMerged
+        ? [`<div class="period-apps"><div class="app-sec">Combined Original Names</div>
+             <div class="bar-list" id="catRawList"></div></div>`]
+        : []),
+    ];
+    document.getElementById("appDetailTitle").textContent = catDisplay
+      ? `${catDisplay} — ${p.label}`
+      : `${p.label} — Hours Logged`;
+    document.getElementById("appDetailFresh").textContent = winText(p.range, p.h24);
+    document.getElementById("appDetailRows").innerHTML = rows.join("");
+    // top 20 apps — same bars, %-vs-previous-period labels and tooltips as
+    // the dashboard's Top Apps cards
+    const entries = [...agg.values()].sort((a, b) => b.sec - a.sec).slice(0, 20)
+      .map(e => {
+        const prevSec = prevAgg.get(e.name.toLowerCase())?.sec;
+        const pct = prevSec > 0 ? Math.round(100 * e.sec / prevSec) + "%" : "No Trend";
+        return [e.name, e.sec, e.prod,
+          `${catName(e.cat)} — ${NAMES[e.prod]}, ${hrs(e.sec)}h` +
+          (prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                       : `\nNot Used In ${p.prevLabel} (No Trend)`),
+          pct];
+      });
+    renderBarList("periodApps", entries);
+    if (catMerged)
+      renderBarList("catRawList", rawCatRows.slice(0, 5).map(([raw, e]) =>
+        [raw, e.sec, e.prod,
+         `Original RescueTime Category — Renamed To ${catDisplay}\n` +
+         `${hrs(e.sec)}h In ${p.label}`]));
+    detailCard.hidden = false;
+  }
+
+  // =========================================================================
+  // Past 7/30-day top-apps + top-categories cards — merged in from
+  // Weeks-Months.html so every overlay floats over ONE page.
+  // =========================================================================
+  {
+    const APP_N = 8;   // top-apps cards show 8 entries
+    const CAT_N = 5;   // category cards stay at 5
+    // Card click-throughs to the matching RescueTime report. The cards show
+    // ROLLING windows but RescueTime report URLs only support day/week/month
+    // pages, so open the current week / current month.
+    const RTB = "https://www.rescuetime.com/browse/activities/by/rank/for/the/";
+    const CARD_URLS = {
+      appListWeek:  RTB + "week/of/"  + isoOf(now.getTime()),
+      catListWeek:  RTB + "week/of/"  + isoOf(now.getTime()),
+      appListMonth: RTB + "month/of/" + isoOf(now.getTime()),
+      catListMonth: RTB + "month/of/" + isoOf(now.getTime()),
+    };
+    for (const [id, url] of Object.entries(CARD_URLS))
+      document.getElementById(id).closest(".card").addEventListener("click", e => {
+        e.stopPropagation();
+        window.open(url, "_blank", "noopener");
+      });
+
+    // Build an apps list and a categories list from one activity-row set.
+    // tipExtra(nameKey) returns extra tooltip lines (per-day / per-week
+    // breakdowns); prev = {apps, cats} maps of the PREVIOUS period for the
+    // left-anchored %-vs-previous labels.
+    function renderPeriod(rows, appElId, catElId, tipExtra, prev) {
+      const byName = new Map();   // merged by DISPLAY name (dictionary.json)
+      for (const [, sec, , activity, cat, prod] of (rows ?? [])) {
+        const name = appName(activity);
+        const k = name.toLowerCase();
+        const e = byName.get(k) ?? { name, sec: 0, top: 0, cat, prod: String(prod) };
+        e.sec += sec;
+        if (sec > e.top) { e.top = sec; e.cat = cat; e.prod = String(prod); }
+        byName.set(k, e);
+      }
+      const apps = [...byName.values()]
+        .sort((a, b) => b.sec - a.sec)
+        .slice(0, APP_N)
+        .map(e => {
+          const extra = tipExtra ? tipExtra(e.name.toLowerCase()) : "";
+          const prevSec = prev ? (prev.apps.get(e.name.toLowerCase()) ?? 0) : null;
+          const pct = prevSec === null ? null
+            : prevSec > 0 ? Math.round(100 * e.sec / prevSec) + "%" : "No Trend";
+          return [e.name, e.sec, e.prod,
+            `${catName(e.cat)} — ${NAMES[e.prod]}, ${hrs(e.sec)}h` +
+            (pct === null ? "" : prevSec > 0
+              ? `\n${pct} Of The Previous Period (${hrs(prevSec)}h)`
+              : "\nNot Used In The Previous Period (No Trend)") +
+            (extra ? "\n" + extra : ""), pct];
+        });
+      renderBarList(appElId, apps);
+
+      const wk = {}, wkApps = {};
+      for (const [, sec, , activity, cat, prod] of (rows ?? [])) {
+        ((wk[cat] ??= emptyLevels()))[String(prod)] += sec;
+        (wkApps[cat] ??= []).push([activity, sec]);
+      }
+      const cats = Object.entries(wk)
+        .map(([name, v]) => {
+          const total = LEVELS.reduce((a, l) => a + v[l], 0);
+          const dominant = LEVELS.reduce((best, l) => v[l] > v[best] ? l : best, "0");
+          const catApps = new Map();
+          for (const [a, s] of (wkApps[name] ?? [])) {
+            const n = appName(a);
+            catApps.set(n, (catApps.get(n) ?? 0) + s);
+          }
+          const topApps = [...catApps]
+            .sort((a, b) => b[1] - a[1]).slice(0, 5)
+            .map(([n, s]) => `${hrs(s)}h  ${n}`)
+            .join("\n");
+          const prevSec = prev ? (prev.cats.get(name) ?? 0) : null;
+          const pct = prevSec === null ? null
+            : prevSec > 0 ? Math.round(100 * total / prevSec) + "%" : "No Trend";
+          return [catName(name), total, dominant,
+            (pct === null ? "" : prevSec > 0
+              ? `${pct} Of The Previous Period (${hrs(prevSec)}h)\n`
+              : "Nothing Logged In The Previous Period (No Trend)\n") + topApps,
+            pct];
+        })
+        .filter(([, total]) => total >= 3600)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, CAT_N);
+      renderBarList(catElId, cats);
+    }
+
+    // per-day breakdown for the 7-day app tooltips (hours per day, past 7
+    // days incl. today, keyed by lowercased DISPLAY name)
+    const day7 = new Map();
+    for (let i = 0; i <= 6; i++) {
+      const d = new Date(now); d.setDate(now.getDate() - i);
+      for (const [, sec, , act] of (data.day_activities ?? {})[isoOf(d.getTime())] ?? []) {
+        const k = appName(act).toLowerCase();
+        const arr = day7.get(k) ?? day7.set(k, new Array(7).fill(0)).get(k);
+        arr[i] += sec;
+      }
+    }
+    const cap1 = s => s.charAt(0).toUpperCase() + s.slice(1);
+    const dayLabel = i => {
+      if (i === 0) return "Today";
+      if (i === 1) return "Yesterday";
+      const d = new Date(now); d.setDate(now.getDate() - i);
+      return cap1(d.toLocaleDateString(undefined, { weekday: "long" }));
+    };
+    const tip7 = k => {
+      const arr = day7.get(k);
+      if (!arr) return "";
+      return arr.map((s, i) => s ? `${dayLabel(i)} ${hrs(s)}h` : null)
+        .filter(Boolean).join("\n");
+    };
+    // per-week breakdown for the 30-day app tooltips (hours per Mon-based
+    // calendar week across the past 30 days incl. today)
+    const wk30 = new Map();
+    const curWs = weekStart(now).getTime();
+    for (let i = 0; i <= 29; i++) {
+      const d = new Date(now); d.setDate(now.getDate() - i);
+      const weeksAgo = Math.round((curWs - weekStart(d).getTime()) / 6048e5);
+      for (const [, sec, , act] of (data.day_activities ?? {})[isoOf(d.getTime())] ?? []) {
+        const k = appName(act).toLowerCase();
+        const m = wk30.get(k) ?? wk30.set(k, new Map()).get(k);
+        m.set(weeksAgo, (m.get(weeksAgo) ?? 0) + sec);
+      }
+    }
+    const wkLabel = n => n === 0 ? "Current Week" : n === 1 ? "Last Week"
+      : `${n} Weeks Ago`;
+    const tip30 = k => {
+      const m = wk30.get(k);
+      if (!m) return "";
+      return [...m.entries()].sort((a, b) => a[0] - b[0])
+        .map(([n, s]) => `${wkLabel(n)} ${hrs(s)}h`).join("\n");
+    };
+
+    // previous-period sums for the % labels (apps by display name,
+    // categories by raw name)
+    const mkPrev = () => {
+      const p = { apps: new Map(), cats: new Map() };
+      p.add = (sec, act, cat) => {
+        const k = appName(act).toLowerCase();
+        p.apps.set(k, (p.apps.get(k) ?? 0) + sec);
+        p.cats.set(cat, (p.cats.get(cat) ?? 0) + sec);
+      };
+      return p;
+    };
+    // days 7-13 back = the 7 days before the past-7-days window
+    const prev7 = mkPrev();
+    for (let i = 7; i <= 13; i++) {
+      const d = new Date(now); d.setDate(now.getDate() - i);
+      for (const [, sec, , act, cat] of (data.day_activities ?? {})[isoOf(d.getTime())] ?? [])
+        prev7.add(sec, act, cat);
+    }
+    // days 30-59 back come from archive.json (already loading lazily for the
+    // search) — render both rows once it lands; no % on the 30-day cards if
+    // the archive is missing
+    loadArchive().then(arch => {
+      let prev30 = null;
+      if (arch?.days) {
+        prev30 = mkPrev();
+        const lo = new Date(now); lo.setDate(now.getDate() - 59);
+        const hi = new Date(now); hi.setDate(now.getDate() - 30);
+        const loIso = isoOf(lo.getTime()), hiIso = isoOf(hi.getTime());
+        for (const [day, rows] of Object.entries(arch.days))
+          if (day >= loIso && day <= hiIso)
+            for (const [sec, act, cat] of rows) prev30.add(sec, act, cat);
+      }
+      // Past 7 days incl. today (rolling, like the pulse's week ring) —
+      // curWkRows is the same merged per-day list the week donut uses
+      const week7Rows = curWkRows.length ? curWkRows : data.week_activities;
+      renderPeriod(week7Rows, "appListWeek", "catListWeek", tip7, prev7);
+      // Past 30 days incl. today (rolling, like the pulse's month ring)
+      renderPeriod(data.month_activities, "appListMonth", "catListMonth", tip30, prev30);
+      // total logged hours per period, anchored right on each title row
+      const totOf = rows => (rows ?? []).reduce((s, r) => s + r[1], 0);
+      const setTot = (id, sec, label) => {
+        const el = document.getElementById(id);
+        el.textContent = `${hrs(sec)}h Logged`;
+        el.dataset.tipTitle = `${hrs(sec)}h Logged ${label}`;
+        el.dataset.tipBody = "Rolling Window Incl. Today";
+      };
+      const tot7 = totOf(week7Rows), tot30 = totOf(data.month_activities);
+      setTot("totWeekApps",  tot7,  "In The Current 7 Days");
+      setTot("totMonthApps", tot30, "In The Current 30 Days");
+      // ...and the daily average in the middle of the apps cards' title rows
+      const setAvg = (id, sec, days, label) => {
+        const el = document.getElementById(id);
+        el.textContent = `${hrs(sec / days)}h Avg per day`;
+        el.dataset.tipTitle = `${hrs(sec / days)}h Logged Per Day On Average`;
+        el.dataset.tipBody = label;
+      };
+      setAvg("avgWeekApps",  tot7,  7,  "Current 7 Days Incl. Today");
+      setAvg("avgMonthApps", tot30, 30, "Current 30 Days Incl. Today");
+      // category cards carry the per-LEVEL split instead (avg/total already
+      // sit on the apps cards above them), anchored left on the title row
+      const setMix = (id, rows, label) => {
+        const lv = emptyLevels();
+        for (const [, sec, , , , prod] of rows ?? []) lv[String(prod)] += sec;
+        const prod = lv["2"] + lv["1"], neut = lv["0"], dist = lv["-1"] + lv["-2"];
+        const el = document.getElementById(id);
+        el.textContent = `${hrs(prod)}h Productive - ${hrs(neut)}h Neutral - ${hrs(dist)}h Distracting`;
+        el.dataset.tipTitle = `${label}: ${hrs(prod + neut + dist)}h Logged`;
+        el.dataset.tipBody =
+          `Very Productive ${hrs(lv["2"])}h + Productive ${hrs(lv["1"])}h\n` +
+          `Neutral ${hrs(neut)}h\n` +
+          `Distracting ${hrs(lv["-1"])}h + Very Distracting ${hrs(lv["-2"])}h`;
+      };
+      setMix("mixWeekCats", week7Rows, "Current 7 Days");
+      setMix("mixMonthCats", data.month_activities, "Current 30 Days");
+    });
+  }
+});
+
+// Two bar rows under each pulse — Productive and Distracting hours — in the
+// SAME mirrored look as every other bar row: the bar anchors RIGHT and grows
+// leftwards underneath the text, hours in "xh" format at the LEFT, and the
+// %-vs-previous label at the RIGHT edge.
+// Bars are STACKED by level (same palette as the rings / 14-day chart) and
+// scaled like the list cards: the column's LARGER of the two bars = 100%.
+// prevLv (optional): the PREVIOUS period's level totals — every bar shows
+// its % vs that period (past 24h vs the 24h before, past 7 days vs
+// the 7 days before, past 30 days vs the 30 days before).
+// refs (optional): per-row width references — {prod, down} in hours. When
+// given, 100% of a bar's WIDTH = that reference (the TODAY column uses the
+// 7-day DAILY AVERAGE); if either row exceeds it, widths fall back to the
+// standard form (larger of the two bars = 100%, like the list cards).
+function makeDeltas(elId, lv, acts, appName, prevLv, refs) {
+  const el = document.getElementById(elId);
+  const totalH = hrs(LEVELS.reduce((a, l) => a + lv[l], 0));
+  const prodH  = hrs(prodOf(lv));
+  const downH  = hrs(distOf(lv) + lv["0"]);
+  if (!totalH) {   // keep the two rows' height so the columns stay aligned
+    el.innerHTML = `<div class="cat-row"></div><div class="cat-row"></div>`;
+    return;
+  }
+  const maxH = Math.max(prodH, downH) || 1;
+  const prevProdH = prevLv ? hrs(prodOf(prevLv)) : null;
+  const prevDownH = prevLv ? hrs(distOf(prevLv) + prevLv["0"]) : null;
+  // previous period had 0h -> no meaningful % — the label says "No Trend";
+  // no previous data at all -> no label
+  const vsLabel = (cur, prev) => prev === null ? null
+    : prev > 0 ? Math.round(100 * cur / prev) + "%"
+    : cur > 0 ? "No Trend" : null;
+  const prodVs = vsLabel(prodH, prevProdH), downVs = vsLabel(downH, prevDownH);
+  // width scale (today only): 7-day daily average, with standard fallback
+  const avgProd = refs?.prod > 0 ? 100 * prodH / refs.prod : null;
+  const avgDown = refs?.down > 0 ? 100 * downH / refs.down : null;
+  const useAvg = avgProd !== null && avgDown !== null &&
+                 avgProd <= 100 && avgDown <= 100;
+  const widthOf = (h, ref) =>
+    (useAvg ? 100 * h / ref : 100 * h / maxH).toFixed(1);
+  // The pulse-card bars are CENTERED under each ring and SYMMETRIC (user
+  // request): the mildest level sits whole in the middle, every other level
+  // splits into a half on each side — Distracting row reads
+  // [VD/2][D/2][Neutral][D/2][VD/2], Productive reads [VP/2][P][VP/2].
+  const bar = (h, center, outer, ref, pct) => {
+    const seg = (l, f) =>
+      `<div class="seg" style="flex:${f} 1 0;background:${COLORS[l]}"></div>`;
+    const segs =
+      [...outer].reverse().map(l => seg(l, lv[l] / 2)).join("") +
+      seg(center, lv[center]) +
+      outer.map(l => seg(l, lv[l] / 2)).join("");
+    return `<div class="cat-row">
+        <div class="cat-bar stackbar center" style="width:${widthOf(h, ref)}%">${segs}</div>
+        ${pct !== null ? `<div class="cat-label pct"><span class="cat-time">${pct}</span></div>` : ""}
+        <div class="cat-label"><span class="cat-time">${h}h</span></div>
+      </div>`;
+  };
+  el.innerHTML = bar(prodH, "1", ["2"], refs?.prod, prodVs) +
+                 bar(downH, "0", ["-1", "-2"], refs?.down, downVs);
+
+  // ---- hover tooltips (shared #chartjs-tooltip element, same look as the
+  //      ring-slice tooltips): top apps + hours covered by each row ----
+  const topApps = levels => {
+    const m = new Map();
+    for (const [, sec, , activity, , prod] of (acts ?? []))
+      if (levels.includes(String(prod))) {
+        const n = appName(activity);
+        m.set(n, (m.get(n) ?? 0) + sec);
+      }
+    return [...m].sort((a, b) => b[1] - a[1]).slice(0, 5)
+      .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+  };
+  const vsNote = (pct, prev) => pct === null ? "No Previous-Period Data\n"
+    : pct === "No Trend" ? "Nothing Logged In The Previous Period (No Trend)\n"
+    : `${pct} Of The Previous Period (${prev}h)\n`;
+  const widthNote = ref => ref > 0
+    ? (useAvg ? `Bar Width: 100% = ${ref}h (7-Day Daily Average)\n`
+              : "Bar Width: Standard Scale (Larger Bar = 100%)\n")
+    : "";
+  const rows = el.querySelectorAll(".cat-row");
+  rows[0].dataset.tipTitle = `${prodH}h Productive - Of ${totalH}h Logged`;
+  rows[0].dataset.tipBody = "Very Productive + Productive\n" +
+    vsNote(prodVs, prevProdH) + widthNote(refs?.prod) + topApps(["2", "1"]);
+  rows[1].dataset.tipTitle = `${downH}h Neutral + Distracting - Of ${totalH}h Logged`;
+  rows[1].dataset.tipBody = "Neutral + Distracting + Very Distracting\n" +
+    vsNote(downVs, prevDownH) + widthNote(refs?.down) + topApps(["0", "-1", "-2"]);
+}
+</script>
+</body>
+</html>

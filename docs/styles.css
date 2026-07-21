@@ -1,0 +1,350 @@
+/* ==========================================================================
+   Shared styles for Search-Apps-Pulse.html + Weeks-Months.html
+   (index.html keeps its own tiny inline CSS — different layout, would clash)
+   ========================================================================== */
+
+:root {
+  --bg: #1e1e1e; --panel: #2a2a2a; --panel-edge: #383838; --track: #191919;
+  --text: #e3e3e3; --text-dim: #909090; --pulse: #3a86d4;
+  --vprod: #2563ae; --prod: #5b9bd5; --neut: #8c96a3; --dist: #e8913a; --vdist: #d64541;
+}
+* { box-sizing: border-box; margin: 0; }
+/* .card sets display:flex, which would silently override the UA stylesheet's
+   [hidden] rule — force hidden elements to actually disappear */
+[hidden] { display: none !important; }
+html { font-size: clamp(8px, 2.4vw, 14px); }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 1rem/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* vertical padding is HALF the grid gap: when index.html stacks the two
+     pages, top+bottom padding add up to exactly one normal card gap */
+  padding: clamp(2px, 0.5vw, 7px) clamp(4px, 1.2vw, 16px); overflow: auto;
+}
+
+/* ---- grid: pages pick their column count via grid-1 / grid-2 ---- */
+.grid {
+  display: grid; gap: clamp(4px, 1vw, 14px);
+  max-width: 900px; margin: 0 auto;
+}
+.grid-1 { grid-template-columns: minmax(0, 1fr); }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- cards: sized by their content; cards sharing a grid row stretch to
+        the tallest one, so the 14-day chart card always matches the height
+        of the last-24h card next to it ---- */
+.card {
+  background: var(--panel); border: 1px solid var(--panel-edge);
+  border-radius: 10px; padding: 6px;   /* same small margin on all 4 sides, every card */
+  min-width: 0; height: auto;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.card h2 {
+  font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.3em;
+  flex: 0 0 auto;
+}
+.chart-fill { position: relative; flex: 1 1 auto; min-height: 14.25rem; }  /* 50% taller cards (was 9.5rem) */
+
+/* phones in landscape: one full-screen card per swipe */
+@media (max-height: 460px) and (max-width: 560px) {
+  body { scroll-snap-type: y mandatory; padding: 0; }
+  .grid { display: block; }
+  .card {
+    scroll-snap-align: start; scroll-snap-stop: always;
+    height: 100vh; border-radius: 0; border-left: 0; border-right: 0;
+  }
+  .card > :last-child { flex: 1; min-height: 0; }
+  .stamp { display: none; }
+}
+
+/* ---- pulse donuts: label lives INSIDE the hole, anchored to card top ----
+   Every .donuts row = one narrow DATA column on the far left (bar labels now,
+   maybe more numbers later) + the three period columns, so rows line up. */
+/* first column fits the spelled-out "Distracting" label + multi-line stats */
+.donuts { display: grid; grid-template-columns: 6em repeat(3, minmax(0, 1fr)); gap: clamp(4px, 1vw, 14px); }
+.donuts + .donuts { margin-top: 0.6em; }  /* gap between pulse rings and the bars */
+.label-col { min-width: 0; }
+/* one label per bar row, sized/spaced exactly like the .delta-row/.total-row
+   rows in the period columns so they line up horizontally */
+.delta-label-col .row-label {
+  height: 1.6rem; margin: 0.15rem 0;
+  display: flex; align-items: center;
+}
+.donut-col { text-align: center; min-width: 0; }
+.pulse-wrap {
+  position: relative; width: min(92px, 56%); aspect-ratio: 1;
+  margin: 0 auto; container-type: inline-size;
+}
+.pulse-wrap canvas { position: absolute; inset: 0; }
+.pulse-center {
+  position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center; pointer-events: none;
+}
+.pulse-inner { text-align: center; position: relative; }
+/* number + period word are BOTH in flow, so their COMBINED block is what the
+   flex centering puts in the middle of the ring (user request 2026-07-20) */
+.pulse-num { font-size: 41cqw; line-height: 1; font-weight: 700; color: var(--pulse); }  /* 20% bigger (was 34cqw) */
+.pulse-label {
+  font-size: 10cqw; font-weight: 600; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-dim); margin: 0; line-height: 1.1;
+  white-space: nowrap;
+}
+
+/* ---- hours-to-50 stat in the ring row's data column: the Distracting hours
+   today can still absorb before the pulse drops to 50 (flips to the
+   Productive hours needed when the pulse is below 50) ---- */
+.ring-stat-col {
+  display: flex; flex-direction: column; justify-content: flex-start;
+}
+/* the stat spans the same 92px band the rings occupy, so its value can sit
+   at the SAME HEIGHT as the pulse numbers inside the circles */
+.ring-stat { min-width: 0; height: min(92px, 100%); display: flex; align-items: center; }
+.ring-stat .stat-inner { position: relative; transform: translateY(-0.35rem); }
+.ring-stat-val {
+  font-size: 0.8rem; font-weight: 600; color: var(--text);  /* = card title size */
+  font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.2;
+}
+/* multi-line stat label hangs BELOW the value (like the ring labels) */
+.ring-stat .row-label.multi {
+  position: absolute; top: 100%; left: 0;
+  white-space: normal; line-height: 1.25;
+}
+/* hours-to-50 value: SAME size as the pulse numbers (41cqw of the 92px ring
+   wrap ≈ 37.7px ≈ 2.7rem), coloured red/blue from JS like the pulse itself */
+.ring-stat-val.big { font-size: 2.7rem; font-weight: 700; line-height: 1; }
+
+/* card title row with a right-anchored stat (the 14-day card's daily average) */
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6em; }
+.card-stat {
+  font-size: 0.75rem; color: var(--text-dim); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* the category cards' per-level split stays anchored LEFT, next to the title */
+.card-head .cat-mix { margin-right: auto; text-align: left; }
+
+/* ---- trend delta bars (labels live in the card's left data column) ---- */
+.delta-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; margin: 0.15rem 0; min-height: 1.6rem; }
+.row-label {
+  font-size: 0.8rem; font-weight: 600; letter-spacing: 0.04em;  /* = card title size */
+  color: var(--text-dim);  /* NOT uppercase: labels read as written — Total, Prod, Dist */
+  white-space: nowrap; overflow: hidden; padding-right: 0.4em;
+}
+.delta-left, .delta-right {
+  height: 1.6em; display: flex; align-items: center;
+  min-width: 0; position: relative; overflow: hidden;
+}
+.delta-left  { justify-content: flex-end; border-right: 2px solid #5a5a5a; }
+.delta-right { justify-content: flex-start; }
+.delta-bar { height: 100%; border-radius: 2px; flex: 0 0 auto; display: flex; align-items: center; min-width: 2px; }
+.delta-bar.val-in { color: #fff; }
+.delta-left  .delta-bar { justify-content: flex-start; }
+.delta-right .delta-bar { justify-content: flex-end; }
+.delta-val { font-size: 0.8rem; color: var(--text-dim); padding: 0 0.3em; white-space: nowrap; }  /* = card title size */
+.delta-bar .delta-val { color: inherit; }
+
+/* stacked total-row bars: one segment per productivity level */
+.delta-bar.stack { display: flex; position: relative; overflow: hidden; }
+.delta-bar.stack .seg { height: 100%; min-width: 0; }
+.total-row .cell-l .delta-bar.stack { flex-direction: row-reverse; }  /* neutral ends up next to the centre line */
+.delta-bar.stack .delta-val { position: absolute; left: 0.05em; top: 50%; transform: translateY(-50%); }
+
+/* ---- full-width list bars — EVERY horizontal bar on the site is MIRRORED
+   (user request): the bar anchors RIGHT and grows leftwards UNDERNEATH the
+   text; the overlay text reads "Xh Name" at the LEFT; the %-vs-previous
+   trend label sits at the RIGHT edge ---- */
+.cat-row {
+  position: relative; height: 1.5em; margin: 0.2em 0;
+  border-radius: 4px; overflow: hidden;  /* no track background — bars sit on the card like the pulse card's bars */
+}
+.cat-bar {
+  position: absolute; top: 0; bottom: 0; right: 0;   /* right-anchored */
+  border-radius: 4px; min-width: 2px;
+}
+.cat-label {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: flex-start; gap: 0.6em; padding: 0 0.6em;
+  color: #fff; font-size: 0.8rem; pointer-events: none;  /* = card title size */
+}
+.cat-label .cat-time { order: 1; }    /* hours first... */
+.cat-label .cat-name { order: 2; }    /* ...then the name */
+.cat-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cat-time { font-variant-numeric: tabular-nums; }
+/* stacked-by-level variant: segments flow right-to-left like the bar */
+.cat-bar.stackbar { display: flex; flex-direction: row-reverse; overflow: hidden; }
+.cat-bar.stackbar .seg { height: 100%; min-width: 0; }
+/* the %-vs-previous-period overlay label, anchored at the RIGHT edge */
+.cat-label.pct { justify-content: flex-end; }
+/* pulse-card delta bars: CENTERED under the ring; the symmetric segment
+   order is emitted in the markup, so no row-reverse here */
+.cat-bar.center { left: 50%; right: auto; transform: translateX(-50%); flex-direction: row; }
+/* pulse-card bar rows share the label column's vertical rhythm */
+.deltas .cat-row { height: 1.6rem; margin: 0.15rem 0; }
+.bar-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* 24h card: basis 0 so the LIST never drives the card's height — the 14-day
+   chart card defines the row height and the list fills whatever space that
+   leaves (its JS then drops the rows that don't fit). */
+#card24h .bar-list { flex: 1 1 0; }
+
+/* ---- footer stamp ---- */
+.stamp { max-width: 900px; margin: 10px auto 0; font-size: 0.8rem; color: var(--text-dim); text-align: right; }
+@media (max-width: 420px) { .stamp { display: none; } .card { border-radius: 6px; } }
+@media (max-height: 420px) { .stamp { display: none; } }
+
+/* ---- shared HTML tooltip (Chart.js external + list-row hover) ----
+   A real element: sizes to its content instead of clipping at canvas edges,
+   and z-index puts it above the pulse numbers. */
+#chartjs-tooltip {
+  position: absolute; z-index: 100; pointer-events: none;
+  background: rgba(12, 12, 12, 0.94); border: 1px solid var(--panel-edge);
+  border-radius: 6px; padding: 0.45em 0.7em;
+  color: var(--text); font-size: 0.85rem; line-height: 1.45;
+  white-space: pre; opacity: 0; transition: opacity 0.1s;
+}
+#chartjs-tooltip .tt-title { font-weight: 600; }
+
+/* ---- never show scrollbars (the pages live in small iframes/widgets);
+       scrolling itself still works with the wheel or touch ---- */
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* ---- "% of the previous period" line under each pulse ring ---- */
+.pulse-pct {
+  margin-top: 0.55em; font-size: 0.8rem; font-weight: 600;  /* = card title size */
+  color: var(--text-dim); white-space: nowrap; overflow: hidden;
+}
+.pulse-pct .pct-arrow { font-size: 0.7rem; }
+
+/* ---- app search card: the suggestion list AND the app detail card are
+        OVERLAYS anchored below the search bar (position:absolute), floating
+        over the cards beneath — the page layout never shifts ---- */
+#searchCard { position: relative; overflow: visible; }   /* .card clips otherwise */
+.search-input {
+  width: 100%; background: var(--track); color: var(--text);
+  border: 1px solid var(--panel-edge); border-radius: 6px;
+  font: inherit; font-size: 0.85rem; line-height: 1.4;
+  padding: 0.4em 0.7em; outline: none;
+}
+.search-input:focus { border-color: var(--pulse); }
+.search-input::placeholder { color: var(--text-dim); }
+.search-sug {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 90;
+  background: var(--panel); border: 1px solid var(--panel-edge);
+  border-radius: 10px; padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+.sug-row {           /* [name] [30-day hours] [all-time / period hours] */
+  display: grid; grid-template-columns: 1fr 6.5em 7.5em;
+  gap: 0.6em; align-items: center;
+  padding: 0.3em 0.7em; border-radius: 6px; cursor: pointer;
+  font-size: 1.05rem; color: var(--text);   /* larger, like the detail card */
+}
+.sug-row.active, .sug-row:hover { background: var(--track); }
+.sug-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sug-hours { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.sug-hours .sug-unit { color: var(--text-dim); font-size: 0.8rem; }
+/* labelled group headers (Periods / Categories & Types / Apps) — styled like
+   the card titles so the group kind is readable at a glance */
+.sug-head {
+  font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-dim);
+  padding: 0.25em 0.7em 0.15em;
+}
+.sug-head:not(:first-child) {           /* separate later groups from the one above */
+  border-top: 1px solid var(--panel-edge);
+  margin-top: 4px; padding-top: 0.45em;
+}
+
+/* ---- app detail overlay: current | previous | trend per line ----
+   No shadow (user request) — it should look like every other card. */
+#appDetailCard {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 80;
+  cursor: pointer;
+}
+/* while a detail card OR the suggestion list is open, hide the dashboard
+   cards underneath so the overlay's edge is unmistakable — visibility (not
+   display) keeps the layout height; the search bar card stays visible */
+body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
+/* title row: app name left, data freshness anchored right */
+.app-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6em; }
+.app-head h2 { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-fresh {
+  font-size: 0.9rem; color: var(--text-dim); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* the whole detail card runs LARGER type than the rest of the dashboard —
+   it's a reading surface, not a widget tile */
+#appDetailCard .app-head h2 { font-size: 1.15rem; }
+#appDetailCard .row-label { font-size: 1rem; }
+.app-detail { display: flex; flex-direction: column; }
+.app-period-row {
+  display: grid;                       /* Today 2.1h | ▼ -1.3h | Yesterday 3.4h */
+  grid-template-columns: 8.5rem minmax(4rem, 1fr) minmax(7rem, 1.2fr) 8.5rem minmax(4rem, 1fr);
+  gap: 0.6em; align-items: center; min-height: 2.1rem;
+  border-radius: 4px; padding: 0 0.3em;
+}
+.app-period-row:hover { background: var(--track); }
+/* the trend sits BETWEEN the current and the past period, centered */
+.app-period-row .app-trend { text-align: center; }
+.app-hours {
+  font-size: 1.05rem; font-weight: 600; color: var(--text);
+  font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap;
+}
+.app-hours.app-na { color: var(--text-dim); font-weight: 400; font-size: 0.9rem; }
+.app-trend {
+  font-size: 1rem; font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-align: right;
+}
+.app-trend.app-since { color: var(--text-dim); }
+/* months (col 1) and years (col 2) side by side — a divider line separates
+   this lower half from the period rows above it */
+.app-cols {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.2em; align-items: start;
+  margin-top: 1.3em; padding-top: 0.9em; border-top: 1px solid var(--panel-edge);
+}
+.app-col { min-width: 0; }
+/* period card: the top-20 apps list sits under the same divider the app
+   card uses before its months/years section; the bars share the site-wide
+   mirrored style but at the detail card's larger type */
+.period-apps { margin-top: 1.3em; padding-top: 0.9em; border-top: 1px solid var(--panel-edge); }
+/* Period card summary rows ("Xh Word" format): the stacked bar runs
+   UNDERNEATH its overlay text; the current period spans the grid's left
+   half (cols 1-2), the previous period the right half (cols 4-5). The
+   Total Logged row uses the same cells without a bar. */
+.app-period-row .lvl-cell { margin: 0; height: 1.6em; }
+.app-period-row .lvl-cell.span-l { grid-column: 1 / 3; }
+.app-period-row .lvl-cell.span-r { grid-column: 4 / 6; }
+.app-period-row .lvl-cell .cat-time { font-weight: 600; }
+#appDetailCard .cat-row { height: 2rem; margin: 0.25em 0; }
+#appDetailCard .cat-label { font-size: 1rem; }
+/* single-period rows (specific months + years): label | value | trend */
+.app-stat-row {
+  display: grid; grid-template-columns: 7rem minmax(3.5rem, auto) 1fr;
+  gap: 0.6em; align-items: center; min-height: 2.1rem;
+  border-radius: 4px; padding: 0 0.3em;
+}
+.app-stat-row:hover { background: var(--track); }
+.app-stat-row[data-rt-url] { cursor: pointer; }   /* row links to RescueTime */
+/* small section headers inside the detail card (Past 12 Months / Years) */
+.app-sec {
+  font-size: 0.9rem; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-dim);
+  margin: 0.55em 0 0.15em; padding: 0 0.3em;
+}
+
+/* ---- third pulse row: red down-bar | total logged hours | blue prod-bar ---- */
+.total-row {
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  align-items: center; margin: 0.15rem 0; min-height: 1.6rem;
+}
+.total-row .cell-l, .total-row .cell-r {
+  height: 1.6em; display: flex; align-items: center;
+  min-width: 0; position: relative; overflow: hidden;
+}
+.total-row .cell-l { justify-content: flex-end; }
+.total-row .cell-r { justify-content: flex-start; }
+.total-mid {
+  font-size: 0.8rem; color: var(--text); padding: 0 0.35em;  /* = card title size */
+  white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600;
+}

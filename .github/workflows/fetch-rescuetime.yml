@@ -1,0 +1,85 @@
+# Place at .github/workflows/fetch-rescuetime.yml
+# Repo secret required: RT_KEY (your RescueTime API key)
+# Enable GitHub Pages: Settings -> Pages -> Source: "GitHub Actions"
+#
+# PRIVACY-FIRST DEPLOYMENT: nothing generated is ever committed to the repo.
+# The workflow builds the site on the runner (checkout + fresh data) and
+# uploads it straight to GitHub Pages as a deployment artifact, so
+# docs/archive.json and docs/data.json exist ONLY on the deployed site,
+# never in the repository or its history.
+#
+# The archive's home between runs is the live site itself: each run first
+# downloads the previous deploy's archive.json, then incrementally
+# re-fetches only the last 3 days + hourly rows (scripts/fetch-addition.py,
+# the SAME script the local Fetch-Data.ps1 wrapper runs). If the archive is
+# missing (very first run, or a deleted deployment) the script backfills
+# the full history automatically.
+
+name: Fetch RescueTime data
+
+on:
+  schedule:
+    # Every half hour at :04/:34 — NOT :00/:30: those are GitHub's most
+    # congested cron slots and scheduled runs there get delayed or silently
+    # DROPPED under load. The countdown in index.html targets the same
+    # :04/:34 marks.
+    - cron: "4,34 * * * *"
+  workflow_dispatch:           # manual run button for testing
+  push:
+    branches: [main]           # site/code changes go live without waiting
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a deploy mid-flight; queue the next one instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      # RescueTime interprets restrict_begin/end in the ACCOUNT's timezone;
+      # compute all dates in that timezone too. CHANGE THIS to your own
+      # RescueTime account timezone if you fork this repo.
+      TZ: Europe/Copenhagen
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Restore archive from the live site
+        run: |
+          # The previous deploy's archive.json is the only copy — restore it
+          # before fetching. A 404 (first ever deploy) is fine: the fetch
+          # script then backfills the whole history in one go.
+          curl -fsSL "${{ steps.pages.outputs.base_url }}/archive.json" \
+               -o docs/archive.json \
+            || { rm -f docs/archive.json; echo "No previous archive - full backfill will run."; }
+
+      - name: Fetch incrementally and rebuild data.json
+        env:
+          RT_KEY: ${{ secrets.RT_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RT_KEY" ]; then echo "::error::RT_KEY secret is empty"; exit 1; fi
+          python3 scripts/fetch-addition.py
+          echo "archive.json: $(wc -c < docs/archive.json) bytes"
+          echo "data.json:    $(wc -c < docs/data.json) bytes"
+
+      - name: Upload site as Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

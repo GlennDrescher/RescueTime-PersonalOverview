@@ -67,7 +67,7 @@ Suggestions are grouped and labelled — typing even a single letter like `c` su
 1. **Fork** this repository (or use it as a template).
 2. Get your RescueTime API key: <https://www.rescuetime.com/anapi/manage>.
 3. In your fork: *Settings → Secrets and variables → Actions → New repository secret*, name it `RT_KEY`, paste your key.
-4. *Settings → Pages → Build and deployment → Source*: **GitHub Actions**.
+4. *Settings → Pages → Build and deployment → Source*: **GitHub Actions**. Do this **before** the first workflow run — the workflow can't enable Pages by itself, so until this is set every run fails with *"Get Pages site failed / Not Found"*.
 5. Edit `.github/workflows/fetch-rescuetime.yml` and set `TZ:` to your RescueTime account's timezone.
 6. Go to the *Actions* tab, enable workflows (GitHub disables scheduled workflows in forks until you do), open **Fetch RescueTime data** and press *Run workflow*.
 7. The first run backfills your full available history (about 3 months on RescueTime Lite, more on Premium), then every later run only fetches the last ~3 days — fast and API-friendly.

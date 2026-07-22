@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=55">
+<link rel="stylesheet" href="styles.css?v=76">
 
 </head>
 <body>
@@ -19,7 +19,7 @@
   <div class="card" id="searchCard" style="grid-column: 1 / -1">
     <input class="search-input" id="appSearch" type="text"
            placeholder="Search Apps, Periods or Categories…" autocomplete="off" spellcheck="false">
-    <div class="search-sug" id="searchSug" hidden></div>
+    <div class="card search-sug" id="searchSug" hidden></div>
     <div class="card" id="appDetailCard" hidden>
       <div class="app-head">
         <h2 id="appDetailTitle">App</h2>
@@ -203,8 +203,8 @@ function setStamp(data) {
 }
 
 
-// NOTE: no page-wide RescueTime link — only the period-specific click
-// zones (pulse thirds, day bars, list cards) open rescuetime.com.
+// NOTE: NO RescueTime links anywhere — clicks navigate INSIDE the page
+// (cards open the Trends views, bars/rows carry tooltips only).
 
 
 // External Chart.js tooltip: renders into a shared <div> instead of the canvas.
@@ -347,7 +347,7 @@ function makeDonut(canvasId, numId, lv, acts, appName, tipTitle) {
       solidMerged.set(n, (solidMerged.get(n) ?? 0) + sec);
     }
     const apps = [...solidMerged].sort((a, b) => b[1] - a[1]);
-    new Chart(document.getElementById(canvasId), {
+    return new Chart(document.getElementById(canvasId), {
       type: "doughnut",
       data: { datasets: [{ data: [1], backgroundColor: [COLORS[level]],
                            borderWidth: 0, cutout: "80%" }]},
@@ -359,9 +359,8 @@ function makeDonut(canvasId, numId, lv, acts, appName, tipTitle) {
           afterLabel: () => apps.slice(0, 5).map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n"),
         } } } },
     });
-    return;
   }
-  new Chart(document.getElementById(canvasId), {
+  return new Chart(document.getElementById(canvasId), {
     type: "doughnut",
     data: { datasets: [{
       data: LEVELS.map(l => lv[l]),
@@ -392,6 +391,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   const catMap = Object.fromEntries(Object.entries(renames.categories ?? {})
     .map(([k, v]) => [k.toLowerCase(), v]));
   const catName = raw => catMap[String(raw).toLowerCase()] ?? raw;
+  // anything with less TOTAL logged time than this never appears in the
+  // suggestions or the Top lists — the site-wide 0.5 h floor
+  const MIN_LOGGED_SEC = 1800;
 
   // ---- bucket daily rows ----
   const days = new Map(), weeks = new Map(), months = new Map();
@@ -556,24 +558,24 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     totEl.dataset.tipBody = "Current 14 Days Incl. Today";
   }
 
-  // ---- click zones: pulse card thirds -> the period each column shows;
-  //      the last-24h card -> today's day view ----
-  const rtOpen = tail =>
-    window.open("https://www.rescuetime.com/dashboard/for/the/" + tail, "_blank", "noopener");
+  // ---- click zones (NO RescueTime links anywhere — user request):
+  //      pulse card thirds -> the Trends card (24h third = the overview,
+  //      7-day third = Weekly Pulse, 30-day third = Monthly Pulse);
+  //      the 24h apps card -> the Trends overview ----
   const pulseCard = document.getElementById("pulseCard");
+  pulseCard.classList.add("trend-zone");   // capture listener defers to this card
   pulseCard.addEventListener("click", e => {
     e.stopPropagation();
     const rect = pulseCard.getBoundingClientRect();
     const third = Math.min(2, Math.max(0,
       Math.floor((e.clientX - rect.left) / (rect.width / 3))));
-    // current week / current month, matching what the donuts show
-    rtOpen(third === 0 ? "day/of/"   + isoOf(now.getTime())
-         : third === 1 ? "week/of/"  + isoOf(now.getTime())
-         :               "month/of/" + isoOf(now.getTime()));
+    showTrendsDetail(third === 0 ? undefined : third === 1 ? "w-pulse" : "m-pulse");
   });
-  document.getElementById("card24h").addEventListener("click", e => {
+  const card24 = document.getElementById("card24h");
+  card24.classList.add("trend-zone");
+  card24.addEventListener("click", e => {
     e.stopPropagation();
-    rtOpen("day/of/" + isoOf(now.getTime()));
+    showTrendsDetail();
   });
 
   // ---- top apps over the rolling past 24 hours: same rows as the first
@@ -597,6 +599,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   }
   const rows24List = [...agg.values()]
     .sort((a, b) => b.sec - a.sec)
+    // ALWAYS keep the top 8; the 0.5 h floor only cuts rows beyond them
+    .filter((e, i) => i < 8 || e.sec >= MIN_LOGGED_SEC)
     .map(e => {
       const prevSec = prevAgg.get(e.name.toLowerCase());
       const pct = prevSec > 0 ? Math.round(100 * e.sec / prevSec) + "%" : "No Trend";
@@ -606,17 +610,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
                      : "\nNot Used In The Prior 24 Hours (No Trend)"),
         pct];
     });
-  // Show at most 8 apps; still drop rows that overflow the list's box on
-  // very small widgets. Re-fit on resize.
-  const list24 = document.getElementById("appList24h");
-  const fit24 = () => {
-    renderBarList("appList24h", rows24List.slice(0, 8));
-    const limit = list24.getBoundingClientRect().bottom + 1;
-    for (const row of [...list24.children])
-      if (row.getBoundingClientRect().bottom > limit) row.remove();
-  };
-  fit24();
-  window.addEventListener("resize", fit24);
+  // render EVERY app of the window — the list keeps the card's height and
+  // SCROLLS (thin themed scrollbar) for the rows below the fold
+  renderBarList("appList24h", rows24List);
 
   // ---- past 14 days incl. today, NEWEST FIRST, diverging stacked bars ----
   const dayKeys = [];
@@ -741,15 +737,42 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   window.addEventListener("resize", syncChartFont);
   new ResizeObserver(syncChartFont).observe(document.documentElement);
 
-  // Clicking a bar opens RescueTime's day view for that date; clicks on the
-  // empty canvas fall through to the page-wide dashboard link.
-  dayCanvas.addEventListener("click", e => {
-    const els = dayChart.getElementsAtEventForMode(e, "nearest", { intersect: true }, true);
-    if (!els.length) return;
-    e.stopPropagation();
-    window.open("https://www.rescuetime.com/dashboard/for/the/day/of/" +
-                isoOf(dayKeys[els[0].index]), "_blank", "noopener");
-  });
+  // ---- clicking anywhere in the 14-days card (except a day bar) CYCLES
+  // its content: 14 Days -> Weekly Pulse -> Weekly Categories -> Monthly
+  // Pulse -> Monthly Categories -> Yearly Pulse -> Yearly Categories ->
+  // back. The trend graphs come from the shared buildTrendChart machinery
+  // (archive.json loads lazily on the first cycle). ----
+  {
+    const card14 = dayCanvas.closest(".card");
+    const wrap = document.createElement("div");
+    wrap.className = "cycle-wrap";
+    wrap.hidden = true;
+    wrap.innerHTML = `<canvas id="cycleCanvas"></canvas>`;
+    dayCanvas.parentElement.appendChild(wrap);          // inside .chart-fill
+    const h2 = card14.querySelector("h2");
+    const stats = [document.getElementById("avg14Head"),
+                   document.getElementById("tot14Head")];
+    const VIEWS = [[null, "14 Days"],
+      ["m-pulse", "Monthly Pulse"], ["m-cats", "Monthly Categories"]];
+    let vi = 0, cyc = null;
+    card14.addEventListener("click", async e => {
+      e.stopPropagation();
+      vi = (vi + 1) % VIEWS.length;
+      const [key, name] = VIEWS[vi];
+      cyc?.destroy(); cyc = null;
+      h2.textContent = name;
+      stats.forEach(s => { s.hidden = !!key; });
+      if (!key) {                       // back to the 14-day bars
+        wrap.hidden = true;
+        dayCanvas.style.visibility = "";
+        return;
+      }
+      dayCanvas.style.visibility = "hidden";
+      wrap.hidden = false;
+      // tiny legend on this small card + only the top 5 categories
+      cyc = await buildTrendChart("cycleCanvas", key, { legendScale: 1, topN: 5 });
+    });
+  }
 
   // =========================================================================
   // App search card + app detail card
@@ -771,21 +794,12 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   const overlayMo = new MutationObserver(syncOverlayState);
   overlayMo.observe(detailCard, { attributes: true, attributeFilter: ["hidden"] });
   overlayMo.observe(sugEl, { attributes: true, attributeFilter: ["hidden"] });
-  // The page-wide click handler opens rescuetime.com — keep clicks inside the
+  // Card clicks navigate to Trends views — keep clicks inside the
   // search card local, and let a click on the detail card CLOSE it instead.
   searchCard.addEventListener("click", e => e.stopPropagation());
   detailCard.addEventListener("click", e => {
     e.stopPropagation();
     detailCard.hidden = true;
-  });
-  // Rows carrying data-rt-url (the app card's month/year rows, the period
-  // card's total row): clicking one opens that period's RescueTime report
-  // instead of closing the card.
-  document.getElementById("appDetailRows").addEventListener("click", e => {
-    const row = e.target.closest("[data-rt-url]");
-    if (!row) return;                    // any other click still closes the card
-    e.stopPropagation();
-    window.open(row.dataset.rtUrl, "_blank", "noopener");
   });
   // ESC closes the detail card too (anywhere on the page)...
   document.addEventListener("keydown", e => {
@@ -793,7 +807,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   });
   // ...and so does a click OUTSIDE it. Capture phase, so the click is
   // swallowed before any other handler — closing an overlay must not also
-  // fire the page-wide rescuetime.com link or a card's click-through.
+  // fire a card's click-through.
   document.addEventListener("click", e => {
     const sugOpen = !sugEl.hidden, detOpen = !detailCard.hidden;
     if (!sugOpen && !detOpen) return;
@@ -804,11 +818,29 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     e.preventDefault();
   }, true);
 
+  // ---- every detail card spans the FULL page: from just under the search
+  // bar down to the bottom edge of the (hidden) dashboard cards, so all
+  // search results share one size. The apps list inside then shows exactly
+  // as many rows as fit (see detailRefit). ----
+  const gridEl = document.querySelector(".grid");
+  const sizeDetailCard = () => {
+    if (detailCard.hidden) return;
+    const h = gridEl.getBoundingClientRect().bottom
+            - detailCard.getBoundingClientRect().top;
+    detailCard.style.height = Math.max(120, h) + "px";
+  };
+  let detailRefit = null;        // re-renders + re-trims the period apps list
+  let periodPulseChart = null;   // the period card's CURRENT-period ring
+  let periodPulseChart2 = null;  // ...and its PRIOR-period ring (far right)
+  let trendCharts = [];          // the Trends card's active chart
+  let periodTabChart = null;     // the period card's Weekly-tab chart
+  window.addEventListener("resize", () => {
+    if (!detailCard.hidden) { sizeDetailCard(); detailRefit?.(); }
+    if (!sugEl.hidden) { sizeSugCard(); updateSug(); }  // re-size + re-cap
+  });
+
   let archivePromise = null;
   const loadArchive = () => archivePromise ??= loadJson("archive.json", null);
-  // anything with less TOTAL logged time than this never appears in the
-  // suggestions — the same floor applies to apps and periods (user request)
-  const MIN_LOGGED_SEC = 1800;   // 0.5 h
 
   // All known apps (merged by display name) with their all-time totals —
   // built once from the archive; falls back to the 30-day rows when the
@@ -1082,12 +1114,35 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   // bare divider lines said nothing). Entries under the 0.5 h floor never
   // appear in any group.
   let sugList = [], sugIdx = -1;   // {kind:"period",p} | {kind:"cat",c,p,...} | {kind:"app",a}
+  // the suggestions card shares the detail cards' geometry: same gap under
+  // the search bar, same bottom edge (the grid's) — sizeSugCard mirrors
+  // sizeDetailCard. The card ALWAYS keeps that full size; fewer suggestions
+  // just fill it from the top down, more get capped to what fits.
+  const sizeSugCard = () => {
+    if (sugEl.hidden) return;
+    const h = gridEl.getBoundingClientRect().bottom
+            - sugEl.getBoundingClientRect().top;
+    sugEl.style.height = Math.max(120, h) + "px";
+  };
   function renderSug() {
-    if (!sugList.length) { sugEl.hidden = true; sugEl.innerHTML = ""; return; }
+    if (!sugList.length) {
+      sugEl.hidden = true; sugEl.innerHTML = ""; sugEl.style.height = "";
+      return;
+    }
+    const wasHidden = sugEl.hidden;
     sugEl.hidden = false;
-    sugEl.innerHTML = sugList.map((s, i) => {
+    if (wasHidden) sizeSugCard();
+    const build = list => `<h2 class="sug-title">Search Suggestions</h2>` +
+      `<div class="sug-list">` + list.map((s, i) => {
       const open = `<div class="sug-row${i === sugIdx ? " active" : ""}" data-i="${i}">`;
-      const row = s.kind === "period"
+      const row = s.kind === "trends"
+        // the Trends view: pulse + time-split line charts, months & years
+        ? `${open}
+             <span class="sug-name">Trends</span>
+             <span class="sug-hours"></span>
+             <span class="sug-hours"><span class="sug-unit">Pulse Over Months &amp; Years</span></span>
+           </div>`
+        : s.kind === "period"
         // periods: label left, the period's logged hours right
         ? `${open}
              <span class="sug-name">${esc(s.p.label)}</span>
@@ -1114,10 +1169,25 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
              <span class="sug-hours">${hrs(s.a.last30)}h <span class="sug-unit">30d</span></span>
              <span class="sug-hours">${hrs(s.a.total)}h <span class="sug-unit">Total</span></span>
            </div>`;
-      const heads = { period: "Periods", cat: "Categories &amp; Types", app: "Apps" };
-      return (i === 0 || s.kind !== sugList[i - 1].kind
+      const heads = { trends: "Views", period: "Periods",
+                      cat: "Categories &amp; Types", app: "Apps" };
+      return (i === 0 || s.kind !== list[i - 1].kind
               ? `<div class="sug-head">${heads[s.kind]}</div>` : "") + row;
-    }).join("");
+    }).join("") + `</div>`;
+    sugEl.innerHTML = build(sugList);
+    // cap the list to the card's fixed height: count the rows that fit, cut
+    // sugList there (keeps ↑/↓ navigation in sync with what's visible) and
+    // re-render so a trailing group header without rows disappears too
+    const listEl = sugEl.querySelector(".sug-list");
+    const limit = listEl.getBoundingClientRect().bottom + 1;
+    let visible = 0;
+    for (const el of listEl.querySelectorAll(".sug-row"))
+      if (el.getBoundingClientRect().bottom <= limit) visible++;
+    if (visible < sugList.length) {
+      sugList = sugList.slice(0, Math.max(1, visible));
+      if (sugIdx >= sugList.length) sugIdx = sugList.length - 1;
+      sugEl.innerHTML = build(sugList);
+    }
   }
   async function updateSug() {
     const q = inputEl.value.trim();
@@ -1175,29 +1245,30 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       .filter(a => a.total >= MIN_LOGGED_SEC && matchTier(q, a.name) > 0)
       .sort((x, y) => y.total - x.total || y.last30 - x.last30)
       .map(a => ({ kind: "app", a }));
-    // ALWAYS fill up to 20 suggestions: the 5-per-group caps for periods and
-    // categories only bite while the TOTAL would exceed 20 — leftover slots
-    // go back to periods first ("week" alone shows the last 20 weeks),
-    // then categories/types, then apps.
-    let nPer = Math.min(5, perAll.length),
-        nCat = Math.min(5, catAll.length);
-    let nApp = Math.min(appAll.length, 20 - nPer - nCat);
-    let free = 20 - nPer - nCat - nApp;
-    const morePer = Math.min(free, perAll.length - nPer);
-    nPer += morePer; free -= morePer;
-    nCat += Math.min(free, catAll.length - nCat);
-    sugList = [...perAll.slice(0, nPer), ...catAll.slice(0, nCat), ...appAll.slice(0, nApp)];
+    // special VIEWS on top ("Trends" opens the pulse-over-time charts)
+    const vwAll = matchTier(q, "Trends") > 0 ? [{ kind: "trends" }] : [];
+    // Periods and Categories/Types are HARD-capped at 5 each (fewer when
+    // fewer match); the APPS group alone fills every remaining row of the
+    // full-page card (renderSug cuts the list to the rows that fit).
+    const SUG_MAX = 60;   // candidate budget; the card height trims from here
+    const nPer = Math.min(5, perAll.length),
+          nCat = Math.min(5, catAll.length);
+    const nApp = Math.min(appAll.length, SUG_MAX - vwAll.length - nPer - nCat);
+    sugList = [...vwAll, ...perAll.slice(0, nPer), ...catAll.slice(0, nCat),
+               ...appAll.slice(0, nApp)];
     sugIdx = sugList.length ? 0 : -1;
     renderSug();
   }
   function openSug(i) {
     const s = sugList[i];
     if (!s) return;
-    inputEl.value = s.kind === "period" ? s.p.label
+    inputEl.value = s.kind === "trends" ? "Trends"
+      : s.kind === "period" ? s.p.label
       : s.kind === "cat" ? (s.bare ? s.c.name : s.label)
       : s.a.name;
     sugList = []; renderSug();
-    if (s.kind === "period") showPeriodDetail(s.p);
+    if (s.kind === "trends") showTrendsDetail();
+    else if (s.kind === "period") showPeriodDetail(s.p);
     else if (s.kind === "cat") showPeriodDetail(s.p, s.key, s.c.name);
     else showAppDetail(s.a.name);
   }
@@ -1282,9 +1353,14 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const spanText = (L, r) => typeof r === "string"
       ? `${L}: Rolling Window (Hourly Data)`
       : `${L}: ${r[0] === r[1] ? r[0] : r[0] + " — " + r[1]}`;
-    const fmtCell = v => v === null
-      ? `<div class="app-hours app-na">Not Available</div>`
-      : `<div class="app-hours">${hrs(v)}h</div>`;
+    // one HALF = hours LEFT of the name (the site-wide "Xh Name" order).
+    // No data: the hours slot stays a blank space and a dim "No Data" sits
+    // at the right edge — where "Not Available" used to be.
+    const halfCell = (side, label, v, attrs = "") =>
+      `<div class="app-half ${side}"${attrs}>
+         <div class="app-hours">${v === null ? "" : hrs(v) + "h"}</div>
+         <div class="row-label">${esc(label)}</div>
+         ${v === null ? `<div class="app-na">No Data</div>` : ""}</div>`;
     const rows = lines.map(([curL, curR, prevL, prevR]) => {
       const cur = cellVal(curR), prev = cellVal(prevR);
       let trend = "", tipTrend = "No Comparison Available";
@@ -1305,22 +1381,24 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         (partial ? `Partial — App History Starts ${histStart}\n` : "") + tipTrend;
       return `<div class="app-period-row" data-tip-title="${esc(curL)} Vs ${esc(prevL)}"
                 data-tip-body="${esc(tipBody)}">
-                <div class="row-label">${curL}</div>${fmtCell(cur)}
+                ${halfCell("hl", curL, cur)}
                 <div class="app-trend">${trend}</div>
-                <div class="row-label">${prevL}</div>${fmtCell(prev)}</div>`;
+                ${halfCell("hr", prevL, prev)}</div>`;
     });
+    // total logged hours as the FIRST row, above Today (user request)
     const total = sum(histStart ?? "0000-01-01", todayIso);
-    rows.push(`<div class="app-period-row" data-tip-title="Total: ${hrs(total)}h"
+    rows.unshift(`<div class="app-period-row" data-tip-title="Total: ${hrs(total)}h"
       data-tip-body="${esc("All Recorded Data" + (histStart ? ` Since ${histStart}` : ""))}">
-      <div class="row-label">Total</div>
-      <div class="app-hours">${hrs(total)}h</div>
-      <div class="app-trend app-since">${histStart ? `Since ${esc(histStart)}` : ""}</div>
-      <div class="row-label"></div><div class="app-hours"></div></div>`);
+      ${halfCell("hl", "Total", total)}
+      <div class="app-trend app-since">${histStart ? `Since ${esc(histStart)}` : ""}</div></div>`);
 
-    // ---- one row per SPECIFIC month (past 12) and per YEAR back to the
-    //      start of the data, each with the trend vs the period before it ----
-    // url: clicking the row opens that period's RescueTime report in a new tab
-    const statRow = (label, range, prevRange, prevLabel, url) => {
+    // ---- one HALF-cell per SPECIFIC month (past 12, left) and per YEAR
+    //      (right), sharing the SAME 5-column grid as the period rows above,
+    //      so every column edge lines up card-wide: months = cols 1-2 (like
+    //      Today), the month's trend dead-centre in col 3, years = cols 4-5
+    //      (like Yesterday). The year's own trend lives in its tooltip.
+    //      Tooltips + RescueTime click zones sit per HALF, not per row. ----
+    const statHalf = (side, label, range, prevRange, prevLabel, url) => {
       const v = cellVal(range);
       let trend = "", tipTrend = "No Comparison Available";
       if (v !== null && prevRange) {
@@ -1337,43 +1415,50 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       }
       const partial = histStart && v !== null && range[0] < histStart;
       const tipBody = `${range[0]} — ${range[1]}` +
-        (partial ? `\nPartial — App History Starts ${histStart}` : "") + `\n${tipTrend}` +
-        (url ? "\nClick To Open This Period On RescueTime" : "");
-      return `<div class="app-stat-row"${url ? ` data-rt-url="${esc(url)}"` : ""}
-                data-tip-title="${esc(label)}: ${v === null ? "Not Available" : hrs(v) + "h"}"
-                data-tip-body="${esc(tipBody)}">
-                <div class="row-label">${label}</div>${fmtCell(v)}
-                <div class="app-trend">${trend}</div></div>`;
+        (partial ? `\nPartial — App History Starts ${histStart}` : "") + `\n${tipTrend}`;
+      return { trend,
+        cell: halfCell(side, label, v,
+          ` data-tip-title="${esc(label)}: ${v === null ? "No Data" : hrs(v) + "h"}"
+                data-tip-body="${esc(tipBody)}"`) };
     };
     const monLabel = d => {   // month name only — the past 12 months are unambiguous
       const s = d.toLocaleDateString(undefined, { month: "long" });
       return s.charAt(0).toUpperCase() + s.slice(1);
     };
-    // months in the FIRST column, years in the SECOND, side by side
-    const monthRows = [];
+    const monthCells = [];
     for (let i = 0; i < 12; i++) {
       const s  = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const e  = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
       const ps = new Date(now.getFullYear(), now.getMonth() - i - 1, 1);
       const pe = new Date(now.getFullYear(), now.getMonth() - i, 0);
-      monthRows.push(statRow(monLabel(s), [isoD(s), isoD(i === 0 ? now : e)],
-                             [isoD(ps), isoD(pe)], monLabel(ps),
-                             "https://www.rescuetime.com/dashboard/for/the/month/of/" + isoD(s)));
+      monthCells.push(statHalf("hl", monLabel(s), [isoD(s), isoD(i === 0 ? now : e)],
+                               [isoD(ps), isoD(pe)], monLabel(ps),
+                               "https://www.rescuetime.com/dashboard/for/the/month/of/" + isoD(s)));
     }
-    const yearRows = [];
+    const yearCells = [];
     const startYear = histStart ? +histStart.slice(0, 4) : now.getFullYear();
     for (let y = now.getFullYear(); y >= startYear; y--) {
       const s = new Date(y, 0, 1);
       const e = y === now.getFullYear() ? now : new Date(y, 11, 31);
       const prev = y - 1 >= startYear
         ? [isoD(new Date(y - 1, 0, 1)), isoD(new Date(y - 1, 11, 31))] : null;
-      yearRows.push(statRow(String(y), [isoD(s), isoD(e)], prev, String(y - 1),
-                            `https://www.rescuetime.com/dashboard/for/the/year/of/${y}-01-01`));
+      yearCells.push(statHalf("hr", String(y), [isoD(s), isoD(e)], prev, String(y - 1),
+                              `https://www.rescuetime.com/dashboard/for/the/year/of/${y}-01-01`));
     }
-    rows.push(`<div class="app-cols">
-      <div class="app-col"><div class="app-sec">Past 12 Months</div>${monthRows.join("")}</div>
-      <div class="app-col"><div class="app-sec">Years</div>${yearRows.join("")}</div>
-    </div>`);
+    const myRows = [];
+    for (let i = 0; i < Math.max(monthCells.length, yearCells.length); i++) {
+      const m = monthCells[i], y = yearCells[i];
+      myRows.push(`<div class="app-period-row my-row">
+        ${m ? m.cell : `<div class="app-half hl"></div>`}
+        <div class="app-trend">${m ? m.trend : ""}</div>
+        ${y ? y.cell : ""}</div>`);
+    }
+    rows.push(`<div class="period-apps">
+      <div class="app-period-row my-row my-heads">
+        <div class="app-sec hl">Past 12 Months</div>
+        <div></div>
+        <div class="app-sec hr">Years</div></div>
+      ${myRows.join("")}</div>`);
     // ---- ORIGINAL RescueTime names the dictionary combines into this app
     // (up to 5, all-time hours, standard bar rows) — only shown when the
     // dictionary actually renames/merges something ----
@@ -1411,6 +1496,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
          `Original RescueTime Name — Renamed To ${displayName}\n` +
          `${hrs(e.sec)}h Across All Recorded Data`]));
     detailCard.hidden = false;
+    sizeDetailCard();      // full-page card, same bottom edge as the grid
+    detailRefit = null;    // no fit-to-height list on the app card
   }
 
   // ---- the PERIOD detail card: same overlay as the app card — total logged
@@ -1481,21 +1568,22 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       ? (h24[1] === 0 ? "Rolling Last 24 Hours (Hourly Data)"
                       : `${h24[1]}–${h24[0]} Hours Ago (Hourly Data)`)
       : rangeText(r);
-    // total row: logged hours | trend | the previous period's hours
+    // total row: logged hours | trend | the previous period's hours.
+    // The % is ALWAYS spelled out — "(No Trend)" when the previous period has
+    // nothing logged, so the trend column never silently loses its number.
     let trend = "", tipTrend = "No Comparison Available";
     if (totalSec || prevTotSec) {
       const dHrs = hrs(totalSec - prevTotSec);
       const up = dHrs >= 0;
       const pct = prevTotSec ? Math.round(100 * totalSec / prevTotSec) : null;
       trend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
-               ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
+               ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : " (No Trend)"}</span>`;
       tipTrend = `${p.label} Is ${up ? "+" : ""}${dHrs}h Vs ${p.prevLabel}` +
                  (pct !== null ? ` (${pct}%)` : "");
     }
     const tipBody = (catDisplay ? `${catDisplay} Only\n` : "") +
       `${p.label}: ${winText(p.range, p.h24)}\n` +
-      `${p.prevLabel}: ${winText(p.prevRange, p.prevH24)}\n` + tipTrend +
-      (p.rtUrl ? "\nClick To Open This Period On RescueTime" : "");
+      `${p.prevLabel}: ${winText(p.prevRange, p.prevH24)}\n` + tipTrend;
     // ---- Productive / Neutral / Distracting rows: a stacked level bar +
     // hours for the CURRENT period (left) and the PREVIOUS one (right),
     // all six bars sharing ONE scale so lengths are comparable ----
@@ -1505,24 +1593,28 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       ["Distracting", ["-1", "-2"], "Distracting + Very Distracting"],
     ];
     const sumLv = (A, levels) => levels.reduce((s, l) => s + A.lv[l], 0);
-    const maxSec = Math.max(1, ...BUCKETS.flatMap(([, levels]) =>
-      [sumLv(curA, levels), sumLv(prevA, levels)]));
+    // only the CURRENT period's bars are drawn (the prior-period cells were
+    // replaced by the pulse ring), so they alone set the shared scale
+    const maxSec = Math.max(1, ...BUCKETS.map(([, levels]) => sumLv(curA, levels)));
     // One cell = "Xh Word" text with the stacked bar running UNDERNEATH it.
-    // side = span-l (current period, grid cols 1-2) | span-r (previous, 4-5).
-    const lvlCell = (A, levels, sec, word, side) => {
+    // side = span-l/span-r (category cards' two-sided row) | pt-bar (period
+    // cards' grid). attrs (optional) carries per-cell tooltip / click zones.
+    const lvlCell = (A, levels, sec, word, side, attrs = "") => {
       const segs = levels.map(l =>
         `<div class="seg" style="flex:${A.lv[l]} 1 0;background:${COLORS[l]}"></div>`).join("");
-      return `<div class="cat-row lvl-cell ${side}">
+      return `<div class="cat-row lvl-cell ${side}"${attrs}>
           <div class="cat-bar stackbar" style="width:${(100 * sec / maxSec).toFixed(1)}%">${segs}</div>
           <div class="cat-label"><span class="cat-time">${hrs(sec)}h</span><span class="cat-name">${esc(word)}</span></div>
         </div>`;
     };
     // barless variant of the same cell, for the Total Logged row
-    const textCell = (secH, word, side) =>
-      `<div class="cat-row lvl-cell ${side}">
+    const textCell = (secH, word, side, attrs = "") =>
+      `<div class="cat-row lvl-cell ${side}"${attrs}>
          <div class="cat-label"><span class="cat-time">${secH}h</span><span class="cat-name">${esc(word)}</span></div>
        </div>`;
-    // the level rows make no sense for a single CATEGORY — period cards only
+    // the level rows make no sense for a single CATEGORY — period cards only.
+    // Each bucket contributes a bar cell (grid col 1) + a trend cell (col 3);
+    // the tooltip attrs sit on BOTH cells (there is no row wrapper anymore).
     const bucketRows = catKey ? [] : BUCKETS.map(([label, levels, lvNames]) => {
       const cur = sumLv(curA, levels), prev = sumLv(prevA, levels);
       let bTrend = "", bTip = "No Comparison Available";
@@ -1531,7 +1623,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         const up = dHrs >= 0;
         const pct = prev ? Math.round(100 * cur / prev) : null;
         bTrend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
-                  ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
+                  ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : " (No Trend)"}</span>`;
         bTip = `${up ? "+" : ""}${dHrs}h Vs ${p.prevLabel}` +
                (pct !== null ? ` (${pct}%)` : "");
       }
@@ -1541,12 +1633,10 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         for (const [n, s] of curA.apps[l] ?? []) m.set(n, (m.get(n) ?? 0) + s);
       const tops = [...m].sort((a, b) => b[1] - a[1]).slice(0, 5)
         .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
-      return `<div class="app-period-row"
-          data-tip-title="${esc(label)}: ${hrs(cur)}h Vs ${hrs(prev)}h (${esc(p.prevLabel)})"
-          data-tip-body="${esc(lvNames + "\n" + bTip + (tops ? "\n" + tops : ""))}">
-          ${lvlCell(curA, levels, cur, label, "span-l")}
-          <div class="app-trend">${bTrend}</div>
-          ${lvlCell(prevA, levels, prev, label, "span-r")}</div>`;
+      const attrs = ` data-tip-title="${esc(label)}: ${hrs(cur)}h Vs ${hrs(prev)}h (${esc(p.prevLabel)})"
+          data-tip-body="${esc(lvNames + "\n" + bTip + (tops ? "\n" + tops : ""))}"`;
+      return lvlCell(curA, levels, cur, label, "pt-bar", attrs) +
+        `<div class="app-trend pt-trend"${attrs}>${bTrend}</div>`;
     });
     // ---- ORIGINAL RescueTime category names the dictionary combines into
     // this category (up to 5, this period's hours) — CATEGORY cards only,
@@ -1556,16 +1646,54 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       : [];
     const catMerged = rawCatRows.length > 1 ||
       (rawCatRows.length === 1 && rawCatRows[0][0] !== catDisplay);
+    // summary block. PERIOD cards (v61): ONE shared grid — bar cells (col 1,
+    // their previous width), the CURRENT pulse ring (col 2), the trends
+    // (col 3, exactly midway between the rings), and the PRIOR-period pulse
+    // ring at the far right (col 4). CATEGORY/TYPE cards keep the classic
+    // two-sided total row and get no rings (a type is single-level).
+    const totalAttrs =
+      ` data-tip-title="${esc(catDisplay ? catDisplay + " — " : "")}${esc(p.label)}: ${hrs(totalSec)}h Logged"
+         data-tip-body="${esc(tipBody)}"`;
+    const summaryRows = catKey
+      ? `<div class="app-period-row"${totalAttrs}>
+           ${textCell(hrs(totalSec), "Total Logged", "span-l")}
+           <div class="app-trend">${trend}</div>
+           ${textCell(hrs(prevTotSec), p.prevLabel, "span-r")}</div>`
+      : textCell(hrs(totalSec), "Total Logged", "pt-bar", totalAttrs) +
+        `<div class="app-trend pt-trend"${totalAttrs}>${trend}</div>` +
+        bucketRows.join("");
+    // two pulse rings, drawn exactly like the dashboard pulse card's rings
+    // (total above, number inside, "Current"/"Prior" below): ring 1 = THIS
+    // period, ring 2 = the PRIOR period, its caption naming what it shows
+    const pulseBlock = (sfx, word) => `
+      <div class="period-pulse pt-p${sfx}">
+        <div class="pulse-wrap">
+          <canvas id="periodPulseRing${sfx}"></canvas>
+          <div class="pulse-center"><div class="pulse-inner">
+            <div class="pulse-label" id="periodPulseTotal${sfx}">–</div>
+            <div class="pulse-num" id="periodPulseNum${sfx}">–</div>
+            <div class="pulse-label">${word}</div>
+          </div></div>
+        </div>
+        <div class="pulse-pct" id="periodPulsePct${sfx}" hidden></div>
+      </div>`;
     const rows = [
-      `<div class="app-period-row"${p.rtUrl ? ` data-rt-url="${esc(p.rtUrl)}"` : ""}
-         data-tip-title="${esc(catDisplay ? catDisplay + " — " : "")}${esc(p.label)}: ${hrs(totalSec)}h Logged"
-         data-tip-body="${esc(tipBody)}">
-         ${textCell(hrs(totalSec), "Total Logged", "span-l")}
-         <div class="app-trend">${trend}</div>
-         ${textCell(hrs(prevTotSec), p.prevLabel, "span-r")}</div>`,
-      ...bucketRows,
-      `<div class="period-apps"><div class="app-sec">Top 20 Apps</div>
-         <div class="bar-list" id="periodApps"></div></div>`,
+      catKey
+        ? `<div class="period-top">
+             <div class="period-top-rows">${summaryRows}</div></div>`
+        : `<div class="period-top ptgrid">${summaryRows}${pulseBlock("1", "Current")}${pulseBlock("2", "Prior")}</div>`,
+      catKey
+        ? `<div class="period-apps fill"><div class="app-sec">Top Apps</div>
+             <div class="bar-list" id="periodApps"></div></div>`
+        : `<div class="period-apps fill">
+             <div class="tab-row" id="periodTabs">
+               <div class="app-sec tab active" data-tab="apps">Apps</div>
+               <div class="app-sec tab" data-tab="cats">Categories</div>
+               <div class="app-sec tab" data-tab="types">Types</div>
+               ${p.h24 ? "" : `<div class="app-sec tab" data-tab="pulse">Pulse</div>
+               <div class="app-sec tab" data-tab="trends">Trends</div>`}
+             </div>
+             <div class="bar-list" id="periodApps"></div></div>`,
       ...(catMerged
         ? [`<div class="period-apps"><div class="app-sec">Combined Original Names</div>
              <div class="bar-list" id="catRawList"></div></div>`]
@@ -1575,10 +1703,63 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       ? `${catDisplay} — ${p.label}`
       : `${p.label} — Hours Logged`;
     document.getElementById("appDetailFresh").textContent = winText(p.range, p.h24);
+    periodTabChart?.destroy(); periodTabChart = null;   // canvas is replaced
     document.getElementById("appDetailRows").innerHTML = rows.join("");
-    // top 20 apps — same bars, %-vs-previous-period labels and tooltips as
-    // the dashboard's Top Apps cards
-    const entries = [...agg.values()].sort((a, b) => b.sec - a.sec).slice(0, 20)
+    // size the card to the page BEFORE rendering the lists, so the Top Apps
+    // section knows exactly how much height it has to fill
+    detailCard.hidden = false;
+    sizeDetailCard();
+    if (catMerged)
+      renderBarList("catRawList", rawCatRows.slice(0, 5).map(([raw, e]) =>
+        [raw, e.sec, e.prod,
+         `Original RescueTime Category — Renamed To ${catDisplay}\n` +
+         `${hrs(e.sec)}h In ${p.label}`]));
+    if (!catKey) {
+      // ring-slice tooltips want activity-shaped rows — rebuild them from the
+      // per-level app sums of each window (names already display-merged)
+      const actsOf = A => {
+        const out = [];
+        for (const [l, m] of Object.entries(A.apps))
+          for (const [n, s] of m) out.push([null, s, null, n, null, l]);
+        return out;
+      };
+      const lvTot = A => hrs(LEVELS.reduce((a, l) => a + A.lv[l], 0));
+      document.getElementById("periodPulseTotal1").textContent = `${lvTot(curA)}h`;
+      document.getElementById("periodPulseTotal2").textContent = `${lvTot(prevA)}h`;
+      periodPulseChart?.destroy();
+      periodPulseChart = makeDonut("periodPulseRing1", "periodPulseNum1",
+        curA.lv, actsOf(curA), n => n,
+        `${p.label} Pulse — ${winText(p.range, p.h24)}`);
+      periodPulseChart2?.destroy();
+      periodPulseChart2 = makeDonut("periodPulseRing2", "periodPulseNum2",
+        prevA.lv, actsOf(prevA), n => n,
+        `${p.prevLabel} Pulse — ${winText(p.prevRange, p.prevH24)}`);
+      pulsePct("periodPulsePct1", curA.lv, prevA.lv, `From ${p.prevLabel}`,
+        `${p.label} Vs ${p.prevLabel}`);
+      // pulsePct hides itself when the previous period has no data — on this
+      // card the line must never vanish (user request), so say why instead
+      const pctEl = document.getElementById("periodPulsePct1");
+      if (pctEl.hidden) {
+        pctEl.hidden = false;
+        pctEl.textContent = `No Trend (${p.prevLabel})`;
+        pctEl.dataset.tipTitle = `No ${p.prevLabel} Data To Compare Against`;
+        pctEl.dataset.tipBody = `${p.label} Vs ${p.prevLabel}`;
+      }
+      // ring 2's caption names the period it shows
+      const pctEl2 = document.getElementById("periodPulsePct2");
+      pctEl2.hidden = false;
+      pctEl2.textContent = p.prevLabel;
+      pctEl2.dataset.tipTitle = `${p.prevLabel} Pulse`;
+      pctEl2.dataset.tipBody = winText(p.prevRange, p.prevH24) || p.prevLabel;
+    }
+    // ---- the tabbed list (Apps / Categories / Types) — the list SCROLLS
+    // inside the card (small themed scrollbar) instead of trimming rows, and
+    // the site-wide 0.5 h floor now applies here too ----
+    // apps: same bars, %-vs-previous-period labels and tooltips as the
+    // dashboard's Top Apps cards; EVERY app ≥ 0.5 h, scrollable
+    const appEntries = [...agg.values()]
+      .filter(e => e.sec >= MIN_LOGGED_SEC)
+      .sort((a, b) => b.sec - a.sec)
       .map(e => {
         const prevSec = prevAgg.get(e.name.toLowerCase())?.sec;
         const pct = prevSec > 0 ? Math.round(100 * e.sec / prevSec) + "%" : "No Trend";
@@ -1588,37 +1769,516 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
                        : `\nNot Used In ${p.prevLabel} (No Trend)`),
           pct];
       });
-    renderBarList("periodApps", entries);
-    if (catMerged)
-      renderBarList("catRawList", rawCatRows.slice(0, 5).map(([raw, e]) =>
-        [raw, e.sec, e.prod,
-         `Original RescueTime Category — Renamed To ${catDisplay}\n` +
-         `${hrs(e.sec)}h In ${p.label}`]));
-    detailCard.hidden = false;
+    detailRefit = null;   // no fit-to-height trimming — the list scrolls
+    if (catKey) {
+      renderBarList("periodApps", appEntries);
+      return;
+    }
+    // categories: exact totals from the RAW category sums, merged by display
+    // name (dictionary.json); tooltip apps from each app's dominant category
+    const catAgg = new Map();
+    for (const [raw, e] of cur.rawCats) {
+      const name = catName(raw), k = name.toLowerCase();
+      const c = catAgg.get(k) ?? { name, sec: 0, top: 0, prod: e.prod };
+      c.sec += e.sec;
+      if (e.sec > c.top) { c.top = e.sec; c.prod = e.prod; }
+      catAgg.set(k, c);
+    }
+    const prevCatAgg = new Map();
+    for (const [raw, e] of prev.rawCats) {
+      const k = catName(raw).toLowerCase();
+      prevCatAgg.set(k, (prevCatAgg.get(k) ?? 0) + e.sec);
+    }
+    const appsByCat = new Map();
+    for (const e of agg.values()) {
+      const k = catName(e.cat).toLowerCase();
+      (appsByCat.get(k) ?? appsByCat.set(k, []).get(k)).push([e.name, e.sec]);
+    }
+    const catEntries = [...catAgg.values()]
+      .filter(c => c.sec >= MIN_LOGGED_SEC)
+      .sort((a, b) => b.sec - a.sec)
+      .map(c => {
+        const prevSec = prevCatAgg.get(c.name.toLowerCase());
+        const pct = prevSec > 0 ? Math.round(100 * c.sec / prevSec) + "%" : "No Trend";
+        const tops = (appsByCat.get(c.name.toLowerCase()) ?? [])
+          .sort((x, y) => y[1] - x[1]).slice(0, 5)
+          .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+        return [c.name, c.sec, c.prod,
+          `${NAMES[c.prod]}, ${hrs(c.sec)}h` +
+          (prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                       : `\nNothing Logged In ${p.prevLabel} (No Trend)`) +
+          (tops ? "\n" + tops : ""), pct];
+      });
+    // types: one bar per productivity level (Very Productive .. Very
+    // Distracting) in the level's own colour, sorted by hours like the lists
+    const typeEntries = LEVELS
+      .map(l => {
+        const sec = curA.lv[l], prevSec = prevA.lv[l];
+        const pct = prevSec > 0 ? Math.round(100 * sec / prevSec) + "%" : "No Trend";
+        const tops = [...(curA.apps[l] ?? [])].sort((x, y) => y[1] - x[1]).slice(0, 5)
+          .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+        return [NAMES[l], sec, l,
+          `${hrs(sec)}h ${NAMES[l]}` +
+          (prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                       : `\nNothing Logged In ${p.prevLabel} (No Trend)`) +
+          (tops ? "\n" + tops : ""), pct];
+      })
+      .sort((a, b) => b[1] - a[1]);
+    // the Types tab appends a COMBINED section under the five level bars:
+    // Productive (VP+P) vs Distracting (Neutral+D+VD), drawn as STACKED
+    // segment bars — the same combined colouring as the summary rows and
+    // the pulse card's delta bars
+    const renderTypesTab = () => {
+      renderBarList("periodApps", typeEntries);
+      const combos = [
+        ["Productive",  ["2", "1"],        "Very Productive + Productive"],
+        ["Distracting", ["0", "-1", "-2"], "Neutral + Distracting + Very Distracting"],
+      ];
+      const sum = (A, ls) => ls.reduce((s, l) => s + A.lv[l], 0);
+      const maxC = Math.max(1, ...combos.map(([, ls]) => sum(curA, ls)));
+      const html = combos.map(([label, ls, names]) => {
+        const sec = sum(curA, ls), prevSec = sum(prevA, ls);
+        const pct = prevSec > 0 ? Math.round(100 * sec / prevSec) + "%" : "No Trend";
+        const segs = ls.map(l =>
+          `<div class="seg" style="flex:${curA.lv[l]} 1 0;background:${COLORS[l]}"></div>`).join("");
+        const m = new Map();
+        for (const l of ls)
+          for (const [n, s] of curA.apps[l] ?? []) m.set(n, (m.get(n) ?? 0) + s);
+        const tops = [...m].sort((x, y) => y[1] - x[1]).slice(0, 5)
+          .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+        return `<div class="cat-row"
+            data-tip-title="${esc(`${label}: ${hrs(sec)}h`)}"
+            data-tip-body="${esc(names + "\n" +
+              (prevSec > 0 ? `${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                           : `Nothing Logged In ${p.prevLabel} (No Trend)`) +
+              (tops ? "\n" + tops : ""))}">
+            <div class="cat-bar stackbar" style="width:${(100 * sec / maxC).toFixed(1)}%">${segs}</div>
+            <div class="cat-label pct"><span class="cat-time">${pct}</span></div>
+            <div class="cat-label"><span class="cat-time">${hrs(sec)}h</span><span class="cat-name">${esc(label)}</span></div>
+          </div>`;
+      }).join("");
+      // the Combined block is ANCHORED to the card's bottom (margin-top:auto
+      // in the flexed list — see .bar-list.types-flex); with the level bars
+      // on top the empty middle stays clean
+      const host = document.getElementById("periodApps");
+      host.classList.add("types-flex");
+      // a TYPES graph (each level's share over the period) sits between the
+      // bars and the bottom-anchored Combined block — not on 24h cards
+      if (!p.h24) host.insertAdjacentHTML("beforeend",
+        `<div class="types-graph"><canvas id="periodTrendCanvas"></canvas></div>`);
+      host.insertAdjacentHTML("beforeend",
+        `<div class="types-combined"><div class="app-sec">Combined</div>${html}</div>`);
+      if (!p.h24) periodTabChart = periodGraph("periodTrendCanvas", "types");
+    };
+    // ---- graphs for THIS period: x = the DAYS of the period (or its
+    // MONTHS when the period spans more than ~2 months, e.g. year cards).
+    // Used by the Pulse tab (pulse + type shares), the Trends tab (top-10
+    // categories of the period) and the Types tab's embedded graph. ----
+    let pkmCache = null;
+    const periodKeysMaps = () => pkmCache ??= (() => {
+      const span = (new Date(p.range[1] + "T00:00:00")
+                  - new Date(p.range[0] + "T00:00:00")) / 864e5;
+      const monthly = span > 62;
+      const lvM = new Map(), catM = new Map(), totM = new Map();
+      for (const d = new Date(p.range[0] + "T00:00:00"); ; d.setDate(d.getDate() + 1)) {
+        const iso = isoOf(d.getTime());
+        if (iso > p.range[1]) break;
+        const key = monthly ? iso.slice(0, 7) : iso;
+        const l2 = lvM.get(key) ?? lvM.set(key, emptyLevels()).get(key);
+        const cm = catM.get(key) ?? catM.set(key, new Map()).get(key);
+        for (const [sec, , cat, prod] of rowsOf(iso)) {
+          if (LEVELS.includes(String(prod))) l2[String(prod)] += sec;
+          const n = catName(cat);
+          cm.set(n, (cm.get(n) ?? 0) + sec);
+          totM.set(n, (totM.get(n) ?? 0) + sec);
+        }
+      }
+      const keys = [...lvM.keys()];
+      const labels = [], tips = [];
+      const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+      keys.forEach((k, i) => {
+        if (monthly) {
+          const d = new Date(k + "-01T00:00:00");
+          const short = cap(d.toLocaleDateString(undefined, { month: "short" }));
+          labels.push((i === 0 || d.getMonth() === 0)
+            ? `${short} ${String(d.getFullYear()).slice(2)}` : short);
+          tips.push(`${cap(d.toLocaleDateString(undefined, { month: "long" }))} ${d.getFullYear()}`);
+        } else {
+          const d = new Date(k + "T00:00:00");
+          labels.push((i === 0 || d.getDate() === 1)
+            ? `${d.getDate()}.${d.getMonth() + 1}` : String(d.getDate()));
+          tips.push(d.toLocaleDateString(undefined,
+            { weekday: "short", day: "numeric", month: "short", year: "numeric" }));
+        }
+      });
+      const topCats = [...totM.entries()].sort((a, b) => b[1] - a[1])
+        .slice(0, 10).map(([n]) => n);
+      return { keys, labels, tips, lvM, catM, topCats };
+    })();
+    const periodGraph = (canvasId, what) => {
+      const K = periodKeysMaps();
+      return trendChartCore(canvasId, { keys: K.keys, labels: K.labels,
+        tips: K.tips, lvMap: K.lvM, catMap: K.catM, topCats: K.topCats,
+        what, pointR: 2 });
+    };
+    const renderPeriodGraphTab = what => {
+      const host = document.getElementById("periodApps");
+      host.innerHTML = `<div class="ptab-chart"><canvas id="periodTrendCanvas"></canvas></div>`;
+      periodTabChart = periodGraph("periodTrendCanvas", what);
+    };
+    const TABS = { apps: () => renderBarList("periodApps", appEntries),
+                   cats: () => renderBarList("periodApps", catEntries),
+                   types: renderTypesTab,
+                   pulse: () => renderPeriodGraphTab("pulse"),
+                   trends: () => renderPeriodGraphTab("cats") };
+    const tabRow = document.getElementById("periodTabs");
+    tabRow.addEventListener("click", e => {
+      const t = e.target.closest(".tab");
+      if (!t) return;
+      e.stopPropagation();   // a tab click must NOT close the card
+      tabRow.querySelectorAll(".tab").forEach(x =>
+        x.classList.toggle("active", x === t));
+      periodTabChart?.destroy(); periodTabChart = null;
+      document.getElementById("periodApps").classList.remove("types-flex");
+      TABS[t.dataset.tab]();
+      document.getElementById("periodApps").scrollTop = 0;
+    });
+    TABS.apps();
   }
+
+  // ---- shared trend-chart machinery: the Trends card, the period cards'
+  //      Weekly tabs and the 14-days card's click-cycle all build their
+  //      graphs from here. Periods: w = past 51 weeks, m = past 12 calendar
+  //      months, y = every year from the first logged one to now — the axes
+  //      are FIXED; periods below the 0.5 h floor become gaps in the lines.
+  //      Pulse charts: Pulse (real 0-100) + Productive/Neutral/Distracting
+  //      as % of the period's logged time. Category charts: top 10 all-time
+  //      categories as % of the period's logged time. ----
+  let trendDataPromise = null;
+  const trendData = () => trendDataPromise ??= loadArchive().then(arch => {
+    const monthKeys = [], weekKeys = [], yearKeys = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+    for (let i = 50; i >= 0; i--) {
+      const d = weekStart(now); d.setDate(d.getDate() - 7 * i);
+      weekKeys.push(isoOf(d.getTime()));
+    }
+    const lv = { w: new Map(), m: new Map(), y: new Map() };
+    const cat = { w: new Map(), m: new Map(), y: new Map() };
+    const app = { w: new Map(), m: new Map(), y: new Map() };
+    const catTot = new Map(), appTot = new Map();
+    const keysOf = day => ({
+      w: isoOf(weekStart(new Date(day + "T00:00:00")).getTime()),
+      m: day.slice(0, 7), y: day.slice(0, 4) });
+    const addLv = (day, l, sec) => {
+      if (!LEVELS.includes(String(l))) return;
+      const ks = keysOf(day);
+      for (const p of ["w", "m", "y"]) {
+        const m = lv[p].get(ks[p]) ?? lv[p].set(ks[p], emptyLevels()).get(ks[p]);
+        m[String(l)] += sec;
+      }
+    };
+    const addCat = (day, c, sec) => {
+      const name = catName(c);
+      const ks = keysOf(day);
+      for (const p of ["w", "m", "y"]) {
+        const m = cat[p].get(ks[p]) ?? cat[p].set(ks[p], new Map()).get(ks[p]);
+        m.set(name, (m.get(name) ?? 0) + sec);
+      }
+      catTot.set(name, (catTot.get(name) ?? 0) + sec);
+    };
+    const addApp = (day, a, sec) => {
+      const name = appName(a);
+      const ks = keysOf(day);
+      for (const p of ["w", "m", "y"]) {
+        const m = app[p].get(ks[p]) ?? app[p].set(ks[p], new Map()).get(ks[p]);
+        m.set(name, (m.get(name) ?? 0) + sec);
+      }
+      appTot.set(name, (appTot.get(name) ?? 0) + sec);
+    };
+    if (arch?.days || arch?.day_levels) {
+      for (const [day, rows] of Object.entries(arch.days ?? {}))
+        for (const [sec, act, c, prod] of rows) {
+          addLv(day, prod, sec); addCat(day, c, sec); addApp(day, act, sec);
+        }
+      for (const [day, l2] of Object.entries(arch.day_levels ?? {}))
+        for (const [l, sec] of Object.entries(l2)) addLv(day, l, sec);
+    } else {
+      for (const [date, sec, , prod] of data.rows_daily ?? [])
+        addLv(date.slice(0, 10), prod, sec);
+    }
+    {
+      const logged = [...lv.y.keys()].sort();
+      const first = logged.length ? +logged[0] : now.getFullYear();
+      for (let y = first; y <= now.getFullYear(); y++) yearKeys.push(String(y));
+    }
+    const topCats = [...catTot.entries()].sort((a, b) => b[1] - a[1])
+      .slice(0, 10).map(([n]) => n);
+    const topApps = [...appTot.entries()].sort((a, b) => b[1] - a[1])
+      .slice(0, 10).map(([n]) => n);
+    return { arch, keys: { w: weekKeys, m: monthKeys, y: yearKeys },
+             lv, cat, app, topCats, topApps };
+  });
+  const CAT_COLORS = ["#5b9bd5", "#d64541", "#e8913a", "#8ac06a", "#b07fd6",
+                      "#4fc1bf", "#d6719f", "#c9c95e", "#8c96a3", "#2563ae"];
+  // core renderer: draws ONE trend line chart from prepared per-key maps.
+  // cfg: keys, labels, tips (base text — the core appends "— Xh Logged" /
+  // "— No Data"), lvMap (levels per key), what = "pulse" | "cats",
+  // catMap + topCats for "cats", legendScale (legend font = base × scale;
+  // the small 14-days card passes 1), pointR.
+  function trendChartCore(canvasId, cfg) {
+    const { keys, labels, lvMap, catMap, topCats, what,
+            legendScale = 2, pointR = 3, topN = 10 } = cfg;
+    const totOf = l2 => l2 ? LEVELS.reduce((a, l) => a + l2[l], 0) : 0;
+    const tots = keys.map(k => {
+      const t = totOf(lvMap.get(k));
+      return t >= MIN_LOGGED_SEC ? t : null;    // null = "no data" gap
+    });
+    const tips = keys.map((k, i) => tots[i] === null
+      ? `${cfg.tips[i]} — No Data` : `${cfg.tips[i]} — ${hrs(tots[i])}h Logged`);
+    const px = Math.round(
+      parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.8);
+    const ds = (label, dat, color, extra = {}) => ({
+      label, data: dat, borderColor: color, backgroundColor: color,
+      pointRadius: pointR, pointHoverRadius: 5,
+      borderWidth: 2, tension: 0.3, ...extra });
+    let datasets, labelCb, tipFilter;
+    if (what === "pulse") {
+      const val = f => keys.map((k, i) => tots[i] === null ? null
+        : +(100 * f(lvMap.get(k)) / tots[i]).toFixed(1));
+      const hours = keys.map((k, i) => tots[i] === null ? null : {
+        prod: prodOf(lvMap.get(k)), neut: lvMap.get(k)["0"],
+        dist: distOf(lvMap.get(k)) });
+      datasets = [
+        // pulse in white so it reads as THE metric next to the level lines
+        ds("Pulse", keys.map((k, i) => tots[i] === null ? null
+             : pulseOf(lvMap.get(k))), "#e3e3e3", { borderWidth: 3 }),
+        ds("Productive", val(prodOf), COLORS["1"]),
+        ds("Neutral", val(l2 => l2["0"]), COLORS["0"]),
+        ds("Distracting", val(distOf), COLORS["-2"]),
+      ];
+      labelCb = c => {
+        const h = hours[c.dataIndex];
+        if (!h) return "";
+        return c.dataset.label === "Pulse" ? ` Pulse ${c.raw}`
+          : c.dataset.label === "Productive"
+            ? ` ${hrs(h.prod)}h Productive (${c.raw}%)`
+          : c.dataset.label === "Neutral"
+            ? ` ${hrs(h.neut)}h Neutral (${c.raw}%)`
+            : ` ${hrs(h.dist)}h Distracting (${c.raw}%)`;
+      };
+    } else if (what === "types") {
+      // one line per productivity TYPE — each level's share of the period
+      const val = l => keys.map((k, i) => tots[i] === null ? null
+        : +(100 * lvMap.get(k)[l] / tots[i]).toFixed(1));
+      const hoursOf = l => keys.map((k, i) => tots[i] === null ? null
+        : lvMap.get(k)[l]);
+      datasets = LEVELS.map(l =>
+        ({ ...ds(NAMES[l], val(l), COLORS[l]), secs: hoursOf(l) }));
+      labelCb = c => ` ${hrs(c.dataset.secs[c.dataIndex] ?? 0)}h ${c.dataset.label} (${c.raw}%)`;
+      tipFilter = item => item.raw !== null && item.raw > 0;
+    } else {
+      // the tooltip skips categories at 0% so it stays readable
+      datasets = (topCats ?? []).slice(0, topN).map((name, i) => {
+        const secs = keys.map((k, j) => tots[j] === null ? null
+          : (catMap.get(k)?.get(name) ?? 0));
+        return { ...ds(name, secs.map((s, j) => s === null ? null
+            : +(100 * s / tots[j]).toFixed(1)),
+            CAT_COLORS[i % CAT_COLORS.length],
+            { pointRadius: Math.min(pointR, 2), pointHoverRadius: 4 }), secs };
+      });
+      labelCb = c => ` ${hrs(c.dataset.secs[c.dataIndex] ?? 0)}h ${c.dataset.label} (${c.raw}%)`;
+      tipFilter = item => item.raw !== null && item.raw > 0;
+    }
+    // the y axis scales to the DATA: highest value rounded up to the next
+    // 10% step (58 -> 60) so the tallest line always uses the full height
+    const top = Math.max(0, ...datasets.flatMap(d => d.data.filter(v => v !== null)));
+    const yMax = Math.max(10, Math.min(100, Math.ceil(top / 10) * 10));
+    return new Chart(document.getElementById(canvasId), {
+      type: "line",
+      data: { labels, datasets },
+      options: { responsive: true, maintainAspectRatio: false, ...NO_ANIM,
+        // hovering ANYWHERE over a period shows that period's values
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          // line names UNDER the graph (user request — all graphs)
+          legend: { display: true, position: "bottom",
+            labels: { color: "#909090",
+              boxWidth: 7 * legendScale, boxHeight: 7 * legendScale,
+              font: { size: px * legendScale } } },
+          tooltip: { ...HTML_TOOLTIP, filter: tipFilter ?? (() => true),
+            callbacks: { title: c => tips[c[0].dataIndex] ?? "", label: labelCb } } },
+        scales: {
+          x: { grid: { display: false },
+               ticks: { color: "#909090", maxRotation: 0, font: { size: px } } },
+          // y-axis % at 2x base font, same grey as the rest of the page
+          y: { min: 0, max: yMax, position: "right",
+               grid: { color: "#333333" },
+               ticks: { color: "#909090", font: { size: px * 2 },
+                        callback: v => v + "%" } },
+        } },
+    });
+  }
+  // builds ONE trend chart onto canvasId and returns the Chart.
+  // kind = "<w|m|y>-<pulse|cats>", e.g. "w-cats" = weekly top categories.
+  async function buildTrendChart(canvasId, kind, opts = {}) {
+    const T = await trendData();
+    const [per, what] = kind.split("-");
+    const keys = T.keys[per];
+    const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+    const keyLabel = (k, first) => {
+      if (per === "y") return { lbl: k, tip: k };
+      if (per === "m") {
+        const d = new Date(k + "-01T00:00:00");
+        const short = cap(d.toLocaleDateString(undefined, { month: "short" }));
+        return { lbl: (first || d.getMonth() === 0)
+            ? `${short} ${String(d.getFullYear()).slice(2)}` : short,
+          tip: `${cap(d.toLocaleDateString(undefined, { month: "long" }))} ${d.getFullYear()}` };
+      }
+      const d = new Date(k + "T00:00:00");
+      const wn = isoWeekNum(d);
+      const th = new Date(d); th.setDate(d.getDate() + 3);   // the ISO year lives on Thursday
+      return { lbl: `W${wn}`,   // no year suffix — the year lives in the tooltip
+               tip: `Week ${wn} ${th.getFullYear()} (From ${k})` };
+    };
+    const labels = [], tips = [];
+    keys.forEach((k, i) => {
+      const { lbl, tip } = keyLabel(k, i === 0);
+      labels.push(lbl); tips.push(tip);
+    });
+    return trendChartCore(canvasId, {
+      keys, labels, tips, lvMap: T.lv[per],
+      catMap: what === "apps" ? T.app[per] : T.cat[per],
+      topCats: what === "apps" ? T.topApps : T.topCats,
+      what, pointR: per === "w" ? 2 : 3, ...opts });
+  }
+
+  // ---- the TRENDS detail card: grouped tabs (Weekly / Monthly / Yearly,
+  //      each with a Pulse and a Categories tab) picking ONE graph that
+  //      fills the whole card ----
+  async function showTrendsDetail(initial) {
+    const T = await trendData();
+    document.getElementById("appDetailTitle").textContent =
+      "Trends — Pulse Over Time";
+    const fetchedAt = T.arch?.updated_at ?? data.generated_at;
+    document.getElementById("appDetailFresh").textContent = fetchedAt
+      ? `Data Up To ${new Date(fetchedAt).toLocaleString()}` : "No Data";
+    document.getElementById("appDetailRows").innerHTML = `
+      <div id="trendTabs">
+        <div class="tab-row">
+          <div class="tab-group">Weekly</div>
+          <div class="app-sec tab" data-tab="w-pulse">Pulse</div>
+          <div class="app-sec tab" data-tab="w-cats">Categories</div>
+          <div class="app-sec tab" data-tab="w-apps">Apps</div>
+          <div class="app-sec tab" data-tab="w-combined">Combined</div>
+        </div>
+        <div class="tab-row">
+          <div class="tab-group">Monthly</div>
+          <div class="app-sec tab" data-tab="m-pulse">Pulse</div>
+          <div class="app-sec tab" data-tab="m-cats">Categories</div>
+          <div class="app-sec tab" data-tab="m-apps">Apps</div>
+          <div class="app-sec tab" data-tab="m-combined">Trend Home</div>
+        </div>
+        <div class="tab-row">
+          <div class="tab-group">Yearly</div>
+          <div class="app-sec tab" data-tab="y-pulse">Pulse</div>
+          <div class="app-sec tab" data-tab="y-cats">Categories</div>
+          <div class="app-sec tab" data-tab="y-apps">Apps</div>
+          <div class="app-sec tab" data-tab="y-combined">Combined</div>
+        </div>
+      </div>
+      <div class="trend-body" id="trendBody"></div>`;
+    detailCard.hidden = false;
+    sizeDetailCard();       // the charts need their final box BEFORE creation
+    detailRefit = null;
+    const body = document.getElementById("trendBody");
+    const tabRow = document.getElementById("trendTabs");
+    // COMBINED view: pulse + categories + apps for one period group,
+    // stacked under the tab rows. Monthly Combined is the "Trend Home"
+    // default page.
+    const PER_NAMES = { w: "Weekly", m: "Monthly", y: "Yearly" };
+    const showCombined = async per => {
+      trendCharts.forEach(c => c.destroy());
+      trendCharts = [];
+      const n = PER_NAMES[per];
+      body.innerHTML = `
+        <div class="trend-sec"><div class="app-sec">${n} Pulse</div>
+          <div class="trend-chart"><canvas id="trendC1"></canvas></div></div>
+        <div class="trend-sec"><div class="app-sec">${n} Categories</div>
+          <div class="trend-chart"><canvas id="trendC2"></canvas></div></div>
+        <div class="trend-sec"><div class="app-sec">${n} Apps</div>
+          <div class="trend-chart"><canvas id="trendC3"></canvas></div></div>`;
+      trendCharts = [
+        await buildTrendChart("trendC1", `${per}-pulse`, { legendScale: 1 }),
+        await buildTrendChart("trendC2", `${per}-cats`, { legendScale: 1 }),
+        await buildTrendChart("trendC3", `${per}-apps`, { legendScale: 1 }),
+      ];
+    };
+    const showTab = async key => {
+      trendCharts.forEach(c => c.destroy());
+      trendCharts = [];
+      body.innerHTML = `<div class="trend-chart fill"><canvas id="trendCanvas"></canvas></div>`;
+      trendCharts = [await buildTrendChart("trendCanvas", key)];
+    };
+    // activate(key) marks the tab and shows its view — "<per>-combined"
+    // keys render the stacked three-graph page
+    const activate = key => {
+      tabRow.querySelectorAll(".tab").forEach(x =>
+        x.classList.toggle("active", x.dataset.tab === key));
+      if (key.endsWith("-combined")) showCombined(key[0]);
+      else showTab(key);
+    };
+    tabRow.addEventListener("click", e => {
+      const t = e.target.closest(".tab");
+      if (!t) return;
+      e.stopPropagation();   // a tab click must NOT close the card
+      activate(t.dataset.tab);
+    });
+    activate(initial ?? "m-combined");
+  }
+
+  // ---- EVERY trend / %-vs-previous-period number on the page is a BUTTON
+  // that opens the Trends card: the % labels on list bars (.cat-label.pct),
+  // the trend cells on the detail cards (.app-trend — except the "Since"
+  // note), and the % lines under the pulse rings (.pulse-pct). Capture
+  // phase, so the click never falls through to a card's RescueTime link or
+  // the overlay-closing handlers. ----
+  document.addEventListener("click", e => {
+    const t = e.target.closest?.(".cat-label.pct, .app-trend, .pulse-pct");
+    if (!t || t.classList.contains("app-since") || !t.textContent.trim()) return;
+    // inside a dashboard card with its OWN Trends mapping (pulse thirds,
+    // 24h/7d/30d cards) the card's handler decides the target view
+    if (t.closest(".trend-zone")) return;
+    e.stopPropagation();
+    e.preventDefault();
+    showTrendsDetail();
+  }, true);
 
   // =========================================================================
   // Past 7/30-day top-apps + top-categories cards — merged in from
   // Weeks-Months.html so every overlay floats over ONE page.
   // =========================================================================
   {
-    const APP_N = 8;   // top-apps cards show 8 entries
-    const CAT_N = 5;   // category cards stay at 5
-    // Card click-throughs to the matching RescueTime report. The cards show
-    // ROLLING windows but RescueTime report URLs only support day/week/month
-    // pages, so open the current week / current month.
-    const RTB = "https://www.rescuetime.com/browse/activities/by/rank/for/the/";
-    const CARD_URLS = {
-      appListWeek:  RTB + "week/of/"  + isoOf(now.getTime()),
-      catListWeek:  RTB + "week/of/"  + isoOf(now.getTime()),
-      appListMonth: RTB + "month/of/" + isoOf(now.getTime()),
-      catListMonth: RTB + "month/of/" + isoOf(now.getTime()),
+    // the lists render MANY entries; CSS caps the cards at their old visual
+    // height (8 app / 5 category rows) and the rest scrolls
+    const APP_N = 40;
+    const CAT_N = 15;
+    // clicking a list card opens the Trends card on the matching tab
+    // (weekly for the 7-day cards, monthly for the 30-day ones)
+    const CARD_TABS = {
+      appListWeek:  "w-apps",  appListMonth: "m-apps",
+      catListWeek:  "w-cats",  catListMonth: "m-cats",
     };
-    for (const [id, url] of Object.entries(CARD_URLS))
-      document.getElementById(id).closest(".card").addEventListener("click", e => {
+    for (const [id, key] of Object.entries(CARD_TABS)) {
+      const card = document.getElementById(id).closest(".card");
+      card.classList.add("trend-zone");   // capture listener defers to the card
+      card.addEventListener("click", e => {
         e.stopPropagation();
-        window.open(url, "_blank", "noopener");
+        showTrendsDetail(key);
       });
+    }
 
     // Build an apps list and a categories list from one activity-row set.
     // tipExtra(nameKey) returns extra tooltip lines (per-day / per-week
@@ -1636,6 +2296,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       }
       const apps = [...byName.values()]
         .sort((a, b) => b.sec - a.sec)
+        // ALWAYS keep the top 8; the 0.5 h floor only cuts rows beyond them
+        .filter((e, i) => i < 8 || e.sec >= MIN_LOGGED_SEC)
         .slice(0, APP_N)
         .map(e => {
           const extra = tipExtra ? tipExtra(e.name.toLowerCase()) : "";
@@ -1678,8 +2340,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
               : "Nothing Logged In The Previous Period (No Trend)\n") + topApps,
             pct];
         })
-        .filter(([, total]) => total >= 3600)
         .sort((a, b) => b[1] - a[1])
+        // ALWAYS keep the top 5; the 0.5 h floor only cuts rows beyond them
+        .filter(([, total], i) => i < 5 || total >= MIN_LOGGED_SEC)
         .slice(0, CAT_N);
       renderBarList(catElId, cats);
     }

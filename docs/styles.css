@@ -182,6 +182,17 @@ body {
 /* pulse-card bar rows share the label column's vertical rhythm */
 .deltas .cat-row { height: 1.6rem; margin: 0.15rem 0; }
 .bar-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* EVERY bar list scrolls with the same subtle themed scrollbar when its
+   content exceeds the card (scrollbars are hidden site-wide otherwise) */
+.bar-list { scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent; }
+.bar-list::-webkit-scrollbar { width: 6px; display: block; }
+.bar-list::-webkit-scrollbar-track { background: transparent; }
+.bar-list::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+.bar-list::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+/* dashboard list cards show EXACTLY 8 app rows / 5 category rows (row =
+   1.5em + collapsed 0.2em margins) — the extra rendered rows scroll */
+#appListWeek, #appListMonth { max-height: 13.8em; }
+#catListWeek, #catListMonth { max-height: 8.7em; }
 /* 24h card: basis 0 so the LIST never drives the card's height — the 14-day
    chart card defines the row height and the list fills whatever space that
    leaves (its JS then drops the rows that don't fit). */
@@ -228,12 +239,19 @@ body {
 }
 .search-input:focus { border-color: var(--pulse); }
 .search-input::placeholder { color: var(--text-dim); }
+/* the suggestions overlay is a CARD with the same geometry as the detail
+   cards: same gap under the search bar (grid gap + the bar card's 1px
+   border) and JS-fixed height down to the grid's bottom edge — it always
+   keeps that full size; suggestions fill it from the top down and renderSug
+   caps the list to the rows that fit. .card supplies the panel look. */
 .search-sug {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 90;
-  background: var(--panel); border: 1px solid var(--panel-edge);
-  border-radius: 10px; padding: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  position: absolute; top: calc(100% + 1px + clamp(4px, 1vw, 14px));
+  left: 0; right: 0; z-index: 90;
 }
+/* "Search Suggestions" headline — same size as the detail cards' titles
+   (the uppercase/dim styling comes from the shared .card h2 rule) */
+.search-sug .sug-title { font-size: 1.15rem; }
+.search-sug .sug-list { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .sug-row {           /* [name] [30-day hours] [all-time / period hours] */
   display: grid; grid-template-columns: 1fr 6.5em 7.5em;
   gap: 0.6em; align-items: center;
@@ -257,9 +275,15 @@ body {
 }
 
 /* ---- app detail overlay: current | previous | trend per line ----
-   No shadow (user request) — it should look like every other card. */
+   No shadow (user request) — it should look like every other card.
+   The gap to the search bar = the grid's card gap (same clamp), and the
+   card's HEIGHT is set by JS so its bottom edge lines up with the bottom of
+   the (hidden) dashboard cards — every search result shares one size. */
 #appDetailCard {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 80;
+  /* +1px = the search card's bottom border (top:100% measures its padding
+     box), so the visible gap exactly equals the grid's card gap */
+  position: absolute; top: calc(100% + 1px + clamp(4px, 1vw, 14px));
+  left: 0; right: 0; z-index: 80;
   cursor: pointer;
 }
 /* while a detail card OR the suggestion list is open, hide the dashboard
@@ -277,7 +301,9 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
    it's a reading surface, not a widget tile */
 #appDetailCard .app-head h2 { font-size: 1.15rem; }
 #appDetailCard .row-label { font-size: 1rem; }
-.app-detail { display: flex; flex-direction: column; }
+/* fills the JS-sized card; scrolls (scrollbars hidden site-wide) in the rare
+   case a card's fixed content is taller than the page */
+.app-detail { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .app-period-row {
   display: grid;                       /* Today 2.1h | ▼ -1.3h | Yesterday 3.4h */
   grid-template-columns: 8.5rem minmax(4rem, 1fr) minmax(7rem, 1.2fr) 8.5rem minmax(4rem, 1fr);
@@ -291,23 +317,154 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
   font-size: 1.05rem; font-weight: 600; color: var(--text);
   font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap;
 }
-.app-hours.app-na { color: var(--text-dim); font-weight: 400; font-size: 0.9rem; }
 .app-trend {
   font-size: 1rem; font-variant-numeric: tabular-nums;
   white-space: nowrap; overflow: hidden; text-align: right;
 }
 .app-trend.app-since { color: var(--text-dim); }
-/* months (col 1) and years (col 2) side by side — a divider line separates
-   this lower half from the period rows above it */
-.app-cols {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.2em; align-items: start;
-  margin-top: 1.3em; padding-top: 0.9em; border-top: 1px solid var(--panel-edge);
+/* app card halves (v61-62): every row (periods on top, months/years below)
+   is built from HALF cells sharing the same 5-column grid — left halves span
+   cols 1-2, the trend sits in col 3, right halves span cols 4-5, so every
+   column edge lines up card-wide. Inside a half the HOURS come FIRST, then
+   the name ("0.5h Today" — the site-wide order); a row without data keeps a
+   blank hours space and shows a dim "No Data" at the half's right edge.
+   Each HALF carries its own tooltip + RescueTime click zone where needed. */
+.app-period-row .hl { grid-column: 1 / 3; }
+.app-period-row .hr { grid-column: 4 / 6; }
+.app-half {
+  display: grid; grid-template-columns: minmax(2.5rem, auto) minmax(0, 1fr) auto;
+  gap: 0.6em; align-items: center; min-width: 0;
+  min-height: 2.1rem; border-radius: 4px;
 }
-.app-col { min-width: 0; }
-/* period card: the top-20 apps list sits under the same divider the app
+.app-half .row-label { padding-right: 0; }
+.app-half .app-na {
+  color: var(--text-dim); font-size: 0.9rem; white-space: nowrap; text-align: right;
+}
+.app-half:hover { background: var(--track); }
+/* hover highlights the month OR year being pointed at, not the whole row */
+.app-period-row.my-row:hover { background: transparent; }
+.my-heads .app-sec { padding: 0; }
+/* period card: the top-apps list sits under the same divider the app
    card uses before its months/years section; the bars share the site-wide
    mirrored style but at the detail card's larger type */
 .period-apps { margin-top: 1.3em; padding-top: 0.9em; border-top: 1px solid var(--panel-edge); }
+/* the tabbed section absorbs the card's leftover height; the list SCROLLS
+   inside it, with a small theme-matched scrollbar (scrollbars are hidden
+   site-wide, so these rules deliberately re-enable a thin one here) */
+.period-apps.fill { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.period-apps.fill .bar-list {
+  flex: 1 1 0; min-height: 0; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent;
+}
+.period-apps.fill .bar-list::-webkit-scrollbar { width: 6px; height: 6px; display: block; }
+.period-apps.fill .bar-list::-webkit-scrollbar-track { background: transparent; }
+.period-apps.fill .bar-list::-webkit-scrollbar-thumb {
+  background: var(--panel-edge); border-radius: 3px;
+}
+.period-apps.fill .bar-list::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+/* Trends card: the DEFAULT view stacks three monthly graphs under the tab
+   rows; clicking a tab swaps in ONE graph that fills the whole card */
+.trend-chart { position: relative; flex: 1 1 auto; min-height: 8rem; }
+.trend-chart.fill { flex: 1 1 auto; min-height: 0; margin-top: 0.4em; }
+.trend-body {
+  flex: 1 1 auto; min-height: 0; margin-top: 0.4em;
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent;
+}
+.trend-body::-webkit-scrollbar { width: 6px; display: block; }
+.trend-body::-webkit-scrollbar-track { background: transparent; }
+.trend-body::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+.trend-sec { flex: 1 1 0; min-height: 10rem; display: flex; flex-direction: column; }
+.trend-sec + .trend-sec {
+  margin-top: 0.9em; padding-top: 0.6em; border-top: 1px solid var(--panel-edge);
+}
+/* the Types tab's embedded graph between the bars and the Combined block */
+.types-graph { position: relative; flex: 1 1 auto; min-height: 6rem; margin: 0.5em 0; }
+/* the detail card body gets the same small themed scrollbar when its
+   content outgrows the card (e.g. the four Trends charts on short widgets) */
+.app-detail { scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent; }
+.app-detail::-webkit-scrollbar { width: 6px; display: block; }
+.app-detail::-webkit-scrollbar-track { background: transparent; }
+.app-detail::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+.app-detail::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+/* tab rows (period card lists + Trends card): BROWSER-STYLE tabs — every
+   tab is a rounded-top box on a shared baseline; the ACTIVE tab uses the
+   card's own background and merges into the content below, inactive tabs
+   sit recessed on the darker track */
+.tab-row {
+  display: flex; gap: 0.3em; flex-wrap: wrap; align-items: flex-end;
+  border-bottom: 1px solid var(--panel-edge);
+}
+.tab-row .tab {
+  cursor: pointer;
+  margin: 0 0 -1px 0; padding: 0.45em 1em 0.4em;
+  border: 1px solid var(--panel-edge); border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: var(--track); color: #6a6a6a;
+}
+.tab-row .tab:not(.active):hover { color: var(--text-dim); }
+.tab-row .tab.active {
+  background: var(--panel); color: var(--text);
+  border-bottom: 1px solid var(--panel);   /* cuts the row's baseline under it */
+}
+/* NON-clickable group words in front of tabs (Weekly / Monthly / Yearly on
+   the Trends card) — plain labels on the tab baseline, no box. FIXED width
+   so the Pulse/Categories tabs align vertically across the three rows. */
+.tab-row .tab-group {
+  font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-dim);
+  padding: 0.45em 0.2em 0.4em; width: 6.5em; flex: 0 0 auto;
+}
+/* the Trends card stacks its three tab rows (one per period group) */
+#trendTabs .tab-row + .tab-row { margin-top: 0.4em; }
+/* "Trend Home": a plain tab in the Yearly row — returns to the default
+   (Monthly Combined) page */
+/* extra space before each row's 4th tab (Combined) so it stands apart
+   from the Pulse/Categories/Apps group */
+#trendTabs .tab[data-tab$="-combined"] { margin-left: 2em; }
+/* the 14-days card's cycle views draw on an overlay canvas over the bars */
+.cycle-wrap { position: absolute; inset: 0; }
+/* period card Weekly/Daily tabs: the chart fills the list area */
+.ptab-chart { position: relative; height: 100%; min-height: 8rem; }
+/* Types tab: level bars on top, the Combined block ANCHORED to the card's
+   bottom edge (only pushes down while there's spare space) */
+.bar-list.types-flex { display: flex; flex-direction: column; }
+.bar-list.types-flex > .cat-row { flex: 0 0 auto; }
+.types-combined { margin-top: auto; }
+/* every trend / %-vs-previous number is a BUTTON that opens the Trends
+   card — pointer cursor + underline/brighten on hover make that visible */
+.cat-label.pct { pointer-events: auto; cursor: pointer; }
+.app-trend:not(.app-since), .pulse-pct { cursor: pointer; }
+.cat-label.pct:hover, .app-trend:not(.app-since):hover, .pulse-pct:hover {
+  text-decoration: underline; filter: brightness(1.25);
+}
+/* period card header (v62): ONE shared grid — bar cells | trends (directly
+   next to the bars, left-aligned) | CURRENT pulse | PRIOR pulse. Column 1
+   keeps the bars' width; the trend column is fixed and left-anchored right
+   beside it; the two rings share the remaining right side in equal columns.
+   No row wrappers: each summary line is a bar cell (col 1) + a trend cell
+   (col 2) on the same grid row; the rings span all four rows, vertically
+   centred. */
+.period-top { position: relative; }
+.period-top.ptgrid {
+  display: grid;
+  grid-template-columns: calc(25% + 1.5rem) 9rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.25em 0.6em;
+  align-items: center;
+  min-height: 10rem;   /* ring (7.5rem) + its caption always fit */
+}
+.ptgrid .lvl-cell.pt-bar { grid-column: 1; }
+.ptgrid .pt-trend { grid-column: 2; text-align: left; overflow: visible; }
+.ptgrid .period-pulse { grid-row: 1 / 5; align-self: center; justify-self: center; }
+.ptgrid .pt-p1 { grid-column: 3; }
+.ptgrid .pt-p2 { grid-column: 4; }
+.period-top-rows { min-width: 0; }
+.period-pulse { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.period-pulse .pulse-wrap { width: 7.5rem; }
+/* the caption under a ring may wrap to two lines instead of getting clipped
+   away on narrow widgets — it must never disappear */
+.period-pulse .pulse-pct { margin-top: 0.4em; white-space: normal; line-height: 1.3; }
 /* Period card summary rows ("Xh Word" format): the stacked bar runs
    UNDERNEATH its overlay text; the current period spans the grid's left
    half (cols 1-2), the previous period the right half (cols 4-5). The
@@ -318,14 +475,6 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .app-period-row .lvl-cell .cat-time { font-weight: 600; }
 #appDetailCard .cat-row { height: 2rem; margin: 0.25em 0; }
 #appDetailCard .cat-label { font-size: 1rem; }
-/* single-period rows (specific months + years): label | value | trend */
-.app-stat-row {
-  display: grid; grid-template-columns: 7rem minmax(3.5rem, auto) 1fr;
-  gap: 0.6em; align-items: center; min-height: 2.1rem;
-  border-radius: 4px; padding: 0 0.3em;
-}
-.app-stat-row:hover { background: var(--track); }
-.app-stat-row[data-rt-url] { cursor: pointer; }   /* row links to RescueTime */
 /* small section headers inside the detail card (Past 12 Months / Years) */
 .app-sec {
   font-size: 0.9rem; font-weight: 600; letter-spacing: 0.09em;

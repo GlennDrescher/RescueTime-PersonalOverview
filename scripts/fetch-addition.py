@@ -98,6 +98,9 @@ def interval_days(key: str, begin: str, end: str, label: str):
 #   { "format": 1,
 #     "days":       { "YYYY-MM-DD": [[sec, activity, category, prod], ...] },
 #     "day_levels": { "YYYY-MM-DD": {"2": sec, ...} },   # seeded days without app rows
+#     "day_parts":  { "YYYY-MM-DD": [night, morning, afternoon, evening] },
+#                   # seconds logged 0-6 / 6-12 / 12-18 / 18-24 (v81, from
+#                   # hourly data — feeds the Total page's Averages tab)
 #     "history_start": "YYYY-MM-DD" | null,
 #     "backfill_done": true|false,
 #     "updated_at": iso8601 }
@@ -106,11 +109,25 @@ def load_archive() -> dict:
         try:
             a = json.loads(ARCHIVE_PATH.read_text(encoding="utf-8"))
             if a.get("format") == 1:
+                a.setdefault("day_parts", {})   # archives written before v81
                 return a
         except Exception as e:
             print(f"archive.json unreadable ({e}) - rebuilding", file=sys.stderr)
-    return {"format": 1, "days": {}, "day_levels": {},
+    return {"format": 1, "days": {}, "day_levels": {}, "day_parts": {},
             "history_start": None, "backfill_done": False, "updated_at": None}
+
+
+def add_day_parts(archive: dict, hourly_rows) -> None:
+    """Aggregate hourly rows (any shape whose row[0] is an ISO timestamp and
+    row[1] the seconds) into per-day [night, morning, afternoon, evening]
+    quarters (0-6 / 6-12 / 12-18 / 18-24). Days present in the rows are
+    rebuilt from scratch, so a re-run never double-counts."""
+    per_day = {}
+    for row in hourly_rows:
+        t = row[0]
+        day, hour = t[:10], int(t[11:13])
+        per_day.setdefault(day, [0, 0, 0, 0])[hour // 6] += row[1]
+    archive.setdefault("day_parts", {}).update(per_day)
 
 
 def compact_rows(rank_rows) -> list:
@@ -153,6 +170,16 @@ def backfill(archive: dict, key: str, today: date):
         for day, rows in per_day.items():
             archive["days"][day] = compact_rows(rows)
             archive["day_levels"].pop(day, None)
+        # v81: hourly TOTALS for the same month (no restrict_kind — one row
+        # per hour+productivity, small) -> per-day time-of-day quarters for
+        # the Total page's Averages tab. A failure just leaves the month
+        # without day_parts; everything else still works.
+        time.sleep(SLEEP)
+        hb = fetch(key, f"backfill hours {first:%Y-%m}",
+                   perspective="interval", resolution_time="hour",
+                   restrict_begin=first.isoformat(), restrict_end=last.isoformat())
+        if hb:
+            add_day_parts(archive, hb.get("rows", []))
     archive["backfill_done"] = True
 
 
@@ -253,7 +280,7 @@ def main():
     today = date.today()
 
     archive = load_archive() if not args.rebuild else {
-        "format": 1, "days": {}, "day_levels": {},
+        "format": 1, "days": {}, "day_levels": {}, "day_parts": {},
         "history_start": None, "backfill_done": False, "updated_at": None}
 
     if not archive["backfill_done"]:
@@ -271,6 +298,8 @@ def main():
                    restrict_begin=(today - timedelta(days=2)).isoformat(),
                    restrict_end=today.isoformat())
     hour_rows = (hourly or {}).get("rows", [])
+    if hour_rows:                      # v81: keep the time-of-day quarters
+        add_day_parts(archive, hour_rows)   # fresh for the fetched days
 
     recompute_bounds(archive)
     ARCHIVE_PATH.write_text(json.dumps(archive, separators=(",", ":")),

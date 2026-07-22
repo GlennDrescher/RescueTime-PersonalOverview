@@ -25,6 +25,11 @@ on:
     # :04/:34 marks.
     - cron: "4,34 * * * *"
   workflow_dispatch:           # manual run button for testing
+    inputs:
+      rebuild:
+        description: "Full rebuild: ignore the live archive and backfill the entire history (run once after a plan upgrade or fetch-script change)"
+        type: boolean
+        default: false
   push:
     branches: [main]           # site/code changes go live without waiting
 
@@ -63,6 +68,10 @@ jobs:
         uses: actions/configure-pages@v6
 
       - name: Restore archive from the live site
+        # Skipped when a manual run asks for a REBUILD: with no archive on
+        # disk the fetch script backfills the entire history from scratch
+        # (all years the plan allows + the hourly day-part totals).
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.rebuild != true }}
         run: |
           # The previous deploy's archive.json is the only copy — restore it
           # before fetching. A 404 (first ever deploy) is fine: the fetch

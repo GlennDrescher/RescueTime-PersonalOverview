@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=76">
+<link rel="stylesheet" href="styles.css?v=81">
 
 </head>
 <body>
@@ -24,6 +24,17 @@
       <div class="app-head">
         <h2 id="appDetailTitle">App</h2>
         <div class="app-fresh" id="appDetailFresh"></div>
+      </div>
+      <!-- period switcher (v79): on app / category / type / period detail
+           pages — Week/Month/Year jump to the CURRENT rolling windows
+           (Current 7 Days / Current 30 Days / Current Year), Total to all
+           recorded data. Hidden on the Trends pages. -->
+      <div class="pswitch" id="periodSwitch" hidden>
+        <span class="pswitch-label">Change Period To:</span>
+        <button type="button" class="pswitch-btn" data-per="week">Week</button>
+        <button type="button" class="pswitch-btn" data-per="month">Month</button>
+        <button type="button" class="pswitch-btn" data-per="year">Year</button>
+        <button type="button" class="pswitch-btn" data-per="total">Total</button>
       </div>
       <div class="app-detail" id="appDetailRows"></div>
     </div>
@@ -261,13 +272,19 @@ function renderBarList(elId, entries) { // entries: [name, seconds, level, toolt
   const max = Math.max(...entries.map(e => e[1]), 1);
   // entry[4] (optional) = %-vs-previous-period label, anchored RIGHT; the
   // main label reads "Xh Name" at the LEFT; the bar grows right-to-left
-  // underneath (the site-wide mirrored bar style)
-  host.innerHTML = entries.map(([name, sec, lvl, , pct]) => `
-    <div class="cat-row">
+  // underneath (the site-wide mirrored bar style).
+  // entry[5] (optional) = NAV descriptor {kind:"app"|"cat"|"lvl", key,
+  // period} — the row becomes a button that opens that entity's detail
+  // page for the SAME period the row's card shows (delegated listener).
+  // entry[6] (optional) = colour of the row's square linking it to its line
+  // in the graph below (null = keep the space but stay invisible).
+  host.innerHTML = entries.map(([name, sec, lvl, , pct, , dot]) => `
+    <div class="cat-row${dot !== undefined ? " dotted" : ""}">
       <div class="cat-bar" style="width:${(100 * sec / max).toFixed(1)}%;
            background:${COLORS[lvl]}"></div>
       ${pct != null ? `<div class="cat-label pct"><span class="cat-time">${pct}</span></div>` : ""}
       <div class="cat-label">
+        ${dot !== undefined ? `<span class="cat-dot" style="${dot ? `background:${dot}` : "visibility:hidden"}"></span>` : ""}
         <span class="cat-name">${name}</span><span class="cat-time">${(sec / 3600).toFixed(1)}h</span>
       </div>
     </div>`).join("");
@@ -275,6 +292,12 @@ function renderBarList(elId, entries) { // entries: [name, seconds, level, toolt
   host.querySelectorAll(".cat-row").forEach((row, i) => {
     row.dataset.tipTitle = entries[i][0];
     row.dataset.tipBody  = entries[i][3] ?? "";
+    const nav = entries[i][5];
+    if (nav) {
+      row.dataset.navKind = nav.kind;
+      row.dataset.navKey = nav.key;
+      if (nav.period) row.dataset.navPeriod = nav.period;
+    }
   });
 }
 
@@ -608,7 +631,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         `${catName(e.cat)} — ${NAMES[e.prod]}, ${hrs(e.sec)}h` +
         (prevSec > 0 ? `\n${pct} Of The Prior 24 Hours (${hrs(prevSec)}h)`
                      : "\nNot Used In The Prior 24 Hours (No Trend)"),
-        pct];
+        pct, { kind: "app", key: e.name, period: "Current 24 Hours" }];
     });
   // render EVERY app of the window — the list keeps the card's height and
   // SCROLLS (thin themed scrollbar) for the rows below the fold
@@ -839,8 +862,34 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     if (!sugEl.hidden) { sizeSugCard(); updateSug(); }  // re-size + re-cap
   });
 
+  // one detail card at a time: whichever show* function takes the card over
+  // destroys every chart the previous content may have left behind
+  const destroyDetailCharts = () => {
+    periodPulseChart?.destroy(); periodPulseChart = null;
+    periodPulseChart2?.destroy(); periodPulseChart2 = null;
+    periodTabChart?.destroy(); periodTabChart = null;
+    trendCharts.forEach(c => c.destroy()); trendCharts = [];
+  };
+
   let archivePromise = null;
   const loadArchive = () => archivePromise ??= loadJson("archive.json", null);
+
+  // ---- "x% of all your time": an entity's ALL-TIME hours as a share of
+  // EVERY attributable hour in the archive — shown right under the Total
+  // Logged line on the app / category / type detail cards ----
+  let grandTotCache = null;
+  const grandTotalSec = arch => grandTotCache ??= (() => {
+    let s = 0;
+    for (const rows of Object.values(arch?.days ?? {}))
+      for (const [sec] of rows) s += sec;
+    return s;
+  })();
+  const fmtPct = v => v >= 9.95 ? String(Math.round(v)) : v.toFixed(1);
+  // The share lines live INSIDE their value cell's own grid (v80): the app
+  // card puts "% / Of All Your Time" as a second grid row of the Total
+  // halfCell, the category/type/app-period cards build theirs into the
+  // four-column entity summary in showPeriodDetail — so the share is always
+  // aligned and styled exactly like the hours line above it.
 
   // All known apps (merged by display name) with their all-time totals —
   // built once from the archive; falls back to the 30-day rows when the
@@ -961,7 +1010,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         dayTot.set(d, (dayTot.get(d) ?? 0) + sec);
       }
     }
-    const sumTot = ([a, b]) => { let s = 0;
+    const sumTot = ([a, b]) => {
+      if (a === b) return dayTot.get(a) ?? 0;   // single-day fast path (v81):
+                                                // with 10y of data the DATE
+                                                // pushes dominate this index
+      let s = 0;
       for (const [d, sec] of dayTot) if (d >= a && d <= b) s += sec;
       return s; };
     const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -1055,6 +1108,19 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     }
     const first = [...dayTot.keys()].sort()[0];
     if (first) {
+      // "Total" — every logged hour as ONE searchable period (v81). Its
+      // detail page is the all-time view: noPrev hides every prior-period /
+      // trend element, adds the Averages tab and share-% bar labels. Also
+      // works in combos ("Games Total" -> that category's Total page).
+      {
+        const range = [first, isoD(now)];
+        const total = sumTot(range);
+        if (total >= MIN_LOGGED_SEC)
+          out.push({ label: "Total", range, prevLabel: "No Prior Period",
+                     prevRange: ["0001-01-01", "0001-01-01"], prevTotal: 0,
+                     noPrev: true, rtUrl: null, alt: ["All Time"], total, prio });
+        prio++;
+      }
       // calendar months, newest first, back to the START OF THE DATA — a
       // month name suggests that month across EVERY year with data
       // ("January" -> January 2026, January 2025, ...); the 0.5 h floor
@@ -1104,6 +1170,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   function matchTier(q, name) {
     q = q.toLowerCase(); const n = name.toLowerCase();
     if (!q) return -1;
+    if (n === q) return 3;   // EXACT match beats everything (v81) — makes
+                             // "Week 1" rank above Week 10..19 instead of
+                             // being buried below the 5-period cap
     const i = n.indexOf(q);
     return i === 0 ? 2 : i > 0 ? 1 : -1;
   }
@@ -1114,6 +1183,17 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   // bare divider lines said nothing). Entries under the 0.5 h floor never
   // appear in any group.
   let sugList = [], sugIdx = -1;   // {kind:"period",p} | {kind:"cat",c,p,...} | {kind:"app",a}
+  // v81: the FULL matching candidates per group + the current per-group
+  // caps. renderSug grows the caps (Periods first, then Categories, then
+  // Apps) while every row still fits, so the card ideally has no empty
+  // space; sugExpand limits that grow pass to one per fresh query.
+  let sugPools = null, sugCounts = null, sugExpand = false;
+  const composeSug = () => {
+    sugList = sugPools ? [...sugPools.vw,
+      ...sugPools.per.slice(0, sugCounts.per),
+      ...sugPools.cat.slice(0, sugCounts.cat),
+      ...sugPools.app.slice(0, sugCounts.app)] : [];
+  };
   // the suggestions card shares the detail cards' geometry: same gap under
   // the search bar, same bottom edge (the grid's) — sizeSugCard mirrors
   // sizeDetailCard. The card ALWAYS keeps that full size; fewer suggestions
@@ -1187,6 +1267,34 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       sugList = sugList.slice(0, Math.max(1, visible));
       if (sugIdx >= sugList.length) sugIdx = sugList.length - 1;
       sugEl.innerHTML = build(sugList);
+      sugExpand = false;   // the card is already over-full — nothing to grow
+    } else if (sugExpand && sugPools) {
+      // v81: everything fit — grow the 5-row Periods/Categories caps (then
+      // Apps, if its candidate budget cut it short) one row at a time until
+      // the card is full or the candidates run out
+      sugExpand = false;
+      const fits = () => {
+        const le = sugEl.querySelector(".sug-list");
+        const lim = le.getBoundingClientRect().bottom + 1;
+        for (const el of le.querySelectorAll(".sug-row"))
+          if (el.getBoundingClientRect().bottom > lim) return false;
+        return true;
+      };
+      const grow = ["per", "cat", "app"];
+      let gi = 0, guard = 0;
+      while (guard++ < 80 && gi < grow.length) {
+        const g = grow[gi];
+        if (sugCounts[g] >= sugPools[g].length) { gi++; continue; }
+        sugCounts[g]++;
+        composeSug();
+        sugEl.innerHTML = build(sugList);
+        if (!fits()) {   // one too many — put it back and stop
+          sugCounts[g]--;
+          composeSug();
+          sugEl.innerHTML = build(sugList);
+          break;
+        }
+      }
     }
   }
   async function updateSug() {
@@ -1253,9 +1361,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const SUG_MAX = 60;   // candidate budget; the card height trims from here
     const nPer = Math.min(5, perAll.length),
           nCat = Math.min(5, catAll.length);
-    const nApp = Math.min(appAll.length, SUG_MAX - vwAll.length - nPer - nCat);
-    sugList = [...vwAll, ...perAll.slice(0, nPer), ...catAll.slice(0, nCat),
-               ...appAll.slice(0, nApp)];
+    sugPools = { vw: vwAll, per: perAll, cat: catAll, app: appAll };
+    sugCounts = { per: nPer, cat: nCat,
+      app: Math.min(appAll.length, SUG_MAX - vwAll.length - nPer - nCat) };
+    sugExpand = true;   // let renderSug grow the caps into any free space
+    composeSug();
     sugIdx = sugList.length ? 0 : -1;
     renderSug();
   }
@@ -1291,9 +1401,100 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     if (r) openSug(+r.dataset.i);
   });
 
+  // ---- entity-row navigation (v78): any APP / CATEGORY / TYPE row opens
+  // that entity's detail page scoped to the SAME period the row's card
+  // shows — e.g. a Claude row on a Current 30 Days card opens
+  // "Claude — Current 30 Days" ----
+  async function openEntity(kind, key, periodLabel) {
+    // "Total" is the switcher's synthetic all-time period, not in the index
+    const p = periodLabel === "Total" ? (await switchPeriods()).total
+      : await periodIndex().then(periods =>
+          periods.find(q => q.label === periodLabel)
+          ?? periods.find(q => q.label === "Current 30 Days")
+          ?? periods[0]);
+    if (!p) return;
+    if (kind === "app") showPeriodDetail(p, "app:" + key.toLowerCase(), key);
+    else if (kind === "lvl") showPeriodDetail(p, "lvl:" + key, NAMES[key]);
+    else showPeriodDetail(p, key.toLowerCase(), key);
+  }
+
+  // ---- "Change Period To" switcher (v79): Week / Month / Year / Total
+  // buttons at the top of every app / category / type / period detail page.
+  // Week, Month and Year are ALWAYS the current rolling windows (Current
+  // 7 Days / Current 30 Days / Current Year — user spec), Total = all
+  // recorded data. The synthetic period objects mirror periodIndex's shape
+  // but skip its 0.5 h floor, so the buttons work even in a thin week. ----
+  let switchPeriodsPromise = null;
+  const switchPeriods = () => switchPeriodsPromise ??= loadArchive().then(arch => {
+    const dayTot = new Map();   // same day totals periodIndex builds
+    if (arch?.days || arch?.day_levels) {
+      for (const [d, rows] of Object.entries(arch.days ?? {}))
+        dayTot.set(d, rows.reduce((s, r) => s + r[0], 0));
+      for (const [d, lv] of Object.entries(arch.day_levels ?? {}))
+        dayTot.set(d, Object.values(lv).reduce((s, x) => s + x, 0));
+    } else {
+      for (const [date, sec] of data.rows_daily ?? []) {
+        const d = date.slice(0, 10);
+        dayTot.set(d, (dayTot.get(d) ?? 0) + sec);
+      }
+    }
+    const sumTot = ([a, b]) => { let s = 0;
+      for (const [d, sec] of dayTot) if (d >= a && d <= b) s += sec;
+      return s; };
+    const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+    const isoD = d => isoOf(d.getTime());
+    const mk = (label, range, prevLabel, prevRange) =>
+      ({ label, range, prevLabel, prevRange, total: sumTot(range),
+         prevTotal: sumTot(prevRange), rtUrl: null, alt: null, prio: 0 });
+    const ys = new Date(now.getFullYear(), 0, 1);
+    const pys = new Date(now.getFullYear() - 1, 0, 1);
+    const first = [...dayTot.keys()].sort()[0] ?? isoD(now);
+    // an all-time period has nothing before it — noPrev hides every
+    // prior-period / trend element on the card
+    const total = mk("Total", [first, isoD(now)], "No Prior Period",
+                     ["0001-01-01", "0001-01-01"]);
+    total.noPrev = true;
+    return {
+      week: mk("Current 7 Days", [isoD(addD(now, -6)), isoD(now)],
+               "Prior 7 Days", [isoD(addD(now, -13)), isoD(addD(now, -7))]),
+      month: mk("Current 30 Days", [isoD(addD(now, -29)), isoD(now)],
+                "Prior 30 Days", [isoD(addD(now, -59)), isoD(addD(now, -30))]),
+      year: mk("Current Year", [isoD(ys), isoD(now)],
+               "Past Year", [isoD(pys), isoD(addD(ys, -1))]),
+      total,
+    };
+  });
+  // which entity the open detail card shows — a switcher click reopens THE
+  // SAME entity in the clicked period. per = the active button (null = none).
+  let detailCtx = null;
+  const switchEl = document.getElementById("periodSwitch");
+  const PER_OF_LABEL = { "Current 7 Days": "week", "Current 30 Days": "month",
+                         "Current Year": "year", "Total": "total" };
+  const setSwitch = ctx => {
+    detailCtx = ctx;
+    switchEl.hidden = !ctx;
+    if (ctx) switchEl.querySelectorAll(".pswitch-btn").forEach(b =>
+      b.classList.toggle("active", b.dataset.per === ctx.per));
+  };
+  switchEl.addEventListener("click", async e => {
+    e.stopPropagation();   // a switcher click must NOT close the card
+    const b = e.target.closest(".pswitch-btn");
+    if (!b || !detailCtx) return;
+    const ctx = detailCtx, per = b.dataset.per;
+    if (ctx.per === per) return;   // already showing that period
+    // an app's Total view is the rich all-periods app card, not a period page
+    if (ctx.kind === "app" && per === "total") { showAppDetail(ctx.display); return; }
+    const p = (await switchPeriods())[per];
+    if (ctx.kind === "period") showPeriodDetail(p);
+    else if (ctx.kind === "app") showPeriodDetail(p, "app:" + ctx.key, ctx.display);
+    else if (ctx.kind === "lvl") showPeriodDetail(p, "lvl:" + ctx.key, ctx.display);
+    else showPeriodDetail(p, ctx.key, ctx.display);
+  });
+
   // ---- the detail card: hours for ONE app across every period, with the
   //      trend vs the immediately preceding period of the same length ----
   async function showAppDetail(displayName) {
+    destroyDetailCharts();   // the card may currently hold another view's charts
     const arch = await loadArchive();
     // Per-APP history starts where the archive has actual per-app rows (the
     // seeded archive also carries older level-only days that can't answer
@@ -1385,11 +1586,25 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
                 <div class="app-trend">${trend}</div>
                 ${halfCell("hr", prevL, prev)}</div>`;
     });
-    // total logged hours as the FIRST row, above Today (user request)
+    // total logged hours as the FIRST row, above Today (user request) — with
+    // the app's share of ALL logged time as a SECOND grid row of the SAME
+    // halfCell (v80), so the % right-aligns exactly under the hours
     const total = sum(histStart ?? "0000-01-01", todayIso);
+    const gtAll = grandTotalSec(arch);
+    const sharePct = gtAll ? fmtPct(100 * total / gtAll) : null;
+    const shareTip = sharePct === null ? "" :
+      ` data-tip-title="${esc(`${sharePct}% Of All Your Time`)}"
+        data-tip-body="${esc(`${hrs(total)}h Of ${hrs(gtAll)}h Total Logged\n` +
+          `${displayName} Across All Recorded Data`)}"`;
     rows.unshift(`<div class="app-period-row" data-tip-title="Total: ${hrs(total)}h"
       data-tip-body="${esc("All Recorded Data" + (histStart ? ` Since ${histStart}` : ""))}">
-      ${halfCell("hl", "Total", total)}
+      <div class="app-half hl">
+        <div class="app-hours">${total === null ? "" : hrs(total) + "h"}</div>
+        <div class="row-label">Total</div>
+        ${sharePct === null ? "" :
+          `<div class="app-hours app-share"${shareTip}>${sharePct}%</div>
+           <div class="row-label app-share"${shareTip}>Of All Your Time</div>`}
+      </div>
       <div class="app-trend app-since">${histStart ? `Since ${esc(histStart)}` : ""}</div></div>`);
 
     // ---- one HALF-cell per SPECIFIC month (past 12, left) and per YEAR
@@ -1478,26 +1693,84 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     }
     const raws = [...rawAgg.entries()].sort((a, b) => b[1].sec - a[1].sec);
     const isMerged = raws.length > 1 || (raws.length === 1 && raws[0][0] !== displayName);
-    if (isMerged)
-      rows.push(`<div class="period-apps"><div class="app-sec">Combined Original Names</div>
-        <div class="bar-list" id="appRawList"></div></div>`);
     document.getElementById("appDetailTitle").textContent =
-      `${displayName} — Hours Logged`;
+      `${displayName} — Details`;
     // How recent the fetched data goes, anchored right on the title row.
     const fetchedAt = arch?.updated_at ?? data.generated_at;
     const lastDay = appDayKeys[appDayKeys.length - 1];
     document.getElementById("appDetailFresh").textContent = fetchedAt
       ? `Data Up To ${new Date(fetchedAt).toLocaleString()}`
       : lastDay ? `Data Up To ${lastDay}` : "No Data";
-    document.getElementById("appDetailRows").innerHTML = rows.join("");
+    // v81 layout: the period / month / year rows SCROLL in their own area;
+    // Combined Original Names and the app's ALL-TIME graph stay pinned at
+    // the bottom of the card, always visible (user spec)
+    document.getElementById("appDetailRows").innerHTML =
+      `<div class="app-scroll">${rows.join("")}</div>` +
+      (isMerged
+        ? `<div class="period-apps"><div class="app-sec">Combined Original Names</div>
+             <div class="bar-list" id="appRawList"></div></div>` : "") +
+      (histStart
+        ? `<div class="pbot-chart"><canvas id="appTotCanvas"></canvas></div>` : "");
     if (isMerged)
       renderBarList("appRawList", raws.slice(0, 5).map(([raw, e]) =>
         [raw, e.sec, e.prod,
          `Original RescueTime Name — Renamed To ${displayName}\n` +
          `${hrs(e.sec)}h Across All Recorded Data`]));
+    // the all-periods app card IS the app's Total view (v79 switcher)
+    setSwitch({ kind: "app", key, display: displayName, per: "total" });
     detailCard.hidden = false;
     sizeDetailCard();      // full-page card, same bottom edge as the grid
     detailRefit = null;    // no fit-to-height list on the app card
+    // ---- the pinned ALL-TIME graph (v81): this app's share of every
+    // logged hour, bucketed to the whole history's span — days up to two
+    // months, weeks up to ~3 years, HALF-YEARS beyond (Total-page rule) ----
+    if (histStart) {
+      const dayAll = new Map();   // day -> per-level totals of ALL rows (the % denominator)
+      for (const [d2, dayRows] of Object.entries(arch?.days ?? {})) {
+        const lv = dayAll.get(d2) ?? dayAll.set(d2, emptyLevels()).get(d2);
+        for (const [sec, , , prod] of dayRows)
+          if (LEVELS.includes(String(prod))) lv[String(prod)] += sec;
+      }
+      const spanD = (new Date(todayIso + "T00:00:00")
+                   - new Date(histStart + "T00:00:00")) / 864e5;
+      const half = spanD > 1100, weekly = !half && spanD > 62;
+      const lvM = new Map(), appM = new Map();
+      for (const d2 = new Date(histStart + "T00:00:00"); ; d2.setDate(d2.getDate() + 1)) {
+        const iso = isoOf(d2.getTime());
+        if (iso > todayIso) break;
+        const bk = half ? `${d2.getFullYear()}-${d2.getMonth() < 6 ? "01" : "07"}-01`
+          : weekly ? isoOf(weekStart(new Date(iso + "T00:00:00")).getTime()) : iso;
+        const l2 = lvM.get(bk) ?? lvM.set(bk, emptyLevels()).get(bk);
+        const am = appM.get(bk) ?? appM.set(bk, new Map()).get(bk);
+        const dl = dayAll.get(iso);
+        if (dl) for (const l of LEVELS) l2[l] += dl[l];
+        const s = perDay.get(iso);
+        if (s) am.set(displayName, (am.get(displayName) ?? 0) + s);
+      }
+      const keys = [...lvM.keys()];
+      const labels = [], tips = [];
+      keys.forEach((k, i) => {
+        const d2 = new Date(k + "T00:00:00");
+        if (half) {
+          const h = d2.getMonth() < 6 ? 1 : 2;
+          labels.push(`H${h} ${String(d2.getFullYear()).slice(2)}`);
+          tips.push(`H${h} ${d2.getFullYear()} (${h === 1 ? "January – June" : "July – December"})`);
+        } else if (weekly) {
+          const wn = isoWeekNum(d2);
+          const th = new Date(d2); th.setDate(d2.getDate() + 3);
+          labels.push(`W${wn}`);
+          tips.push(`Week ${wn} ${th.getFullYear()} (From ${k})`);
+        } else {
+          labels.push((i === 0 || d2.getDate() === 1)
+            ? `${d2.getDate()}.${d2.getMonth() + 1}` : String(d2.getDate()));
+          tips.push(d2.toLocaleDateString(undefined,
+            { weekday: "short", day: "numeric", month: "short", year: "numeric" }));
+        }
+      });
+      periodTabChart = trendChartCore("appTotCanvas", { keys, labels, tips,
+        lvMap: lvM, catMap: appM, topCats: [displayName],
+        what: "cats", pointR: 2, legendScale: 1 });
+    }
   }
 
   // ---- the PERIOD detail card: same overlay as the app card — total logged
@@ -1512,10 +1785,14 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const rowsOf = iso => arch?.days?.[iso]
       ?? (data.day_activities?.[iso] ?? []).map(([, sec, , act, cat, prod]) => [sec, act, cat, prod]);
     // catKey filters by CATEGORY display name — or, with the "lvl:<prod>"
-    // form, by ONE exact productivity type (Productive ≠ Very Productive)
+    // form, by ONE exact productivity type (Productive ≠ Very Productive),
+    // or, with the "app:<name>" form (v78), by ONE app (display-merged) —
+    // that turns this into the period-scoped APP detail card
     const lvlKey = catKey?.startsWith("lvl:") ? catKey.slice(4) : null;
-    const inCat = (cat, prod) => !catKey
+    const appKey = catKey?.startsWith("app:") ? catKey.slice(4) : null;
+    const inCat = (cat, prod, act) => !catKey
       || (lvlKey ? String(prod) === lvlKey
+        : appKey ? appName(act).toLowerCase() === appKey
                  : catName(cat).toLowerCase() === catKey);
     // ONE combined pass per window: per-app totals + per-level totals/apps +
     // the window's total. Day windows walk the date range; the 24h windows
@@ -1524,7 +1801,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const m = new Map(), lv = emptyLevels(), apps = {};
       const rawCats = new Map();   // raw category -> {sec, top, prod}
       const add = (sec, act, cat, prod) => {
-        if (!inCat(cat, prod)) return;
+        if (!inCat(cat, prod, act)) return;
         const name = appName(act), k = name.toLowerCase();
         const e = m.get(k) ?? { name, sec: 0, top: 0, cat, prod: String(prod) };
         e.sec += sec;
@@ -1534,10 +1811,13 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         lv[l] += sec;
         const lm = (apps[l] ??= new Map());
         lm.set(name, (lm.get(name) ?? 0) + sec);
-        const rc = rawCats.get(cat) ?? { sec: 0, top: 0, prod: l };
+        // "Combined Original Names": raw categories on category cards, raw
+        // ACTIVITY names on the period-scoped app cards (v78)
+        const rcKey = appKey ? act : cat;
+        const rc = rawCats.get(rcKey) ?? { sec: 0, top: 0, prod: l };
         rc.sec += sec;
         if (sec > rc.top) { rc.top = sec; rc.prod = l; }
-        rawCats.set(cat, rc);
+        rawCats.set(rcKey, rc);
       };
       if (h24) {
         const [back1, back0] = h24;
@@ -1571,8 +1851,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // total row: logged hours | trend | the previous period's hours.
     // The % is ALWAYS spelled out — "(No Trend)" when the previous period has
     // nothing logged, so the trend column never silently loses its number.
-    let trend = "", tipTrend = "No Comparison Available";
-    if (totalSec || prevTotSec) {
+    let trend = "", tipTrend = p.noPrev
+      ? `All Recorded Data Since ${p.range[0]}` : "No Comparison Available";
+    if (!p.noPrev && (totalSec || prevTotSec)) {
       const dHrs = hrs(totalSec - prevTotSec);
       const up = dHrs >= 0;
       const pct = prevTotSec ? Math.round(100 * totalSec / prevTotSec) : null;
@@ -1583,7 +1864,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     }
     const tipBody = (catDisplay ? `${catDisplay} Only\n` : "") +
       `${p.label}: ${winText(p.range, p.h24)}\n` +
-      `${p.prevLabel}: ${winText(p.prevRange, p.prevH24)}\n` + tipTrend;
+      (p.noPrev ? "" : `${p.prevLabel}: ${winText(p.prevRange, p.prevH24)}\n`) + tipTrend;
     // ---- Productive / Neutral / Distracting rows: a stacked level bar +
     // hours for the CURRENT period (left) and the PREVIOUS one (right),
     // all six bars sharing ONE scale so lengths are comparable ----
@@ -1617,8 +1898,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // the tooltip attrs sit on BOTH cells (there is no row wrapper anymore).
     const bucketRows = catKey ? [] : BUCKETS.map(([label, levels, lvNames]) => {
       const cur = sumLv(curA, levels), prev = sumLv(prevA, levels);
-      let bTrend = "", bTip = "No Comparison Available";
-      if (cur || prev) {
+      let bTrend = "", bTip = p.noPrev ? "All Recorded Data" : "No Comparison Available";
+      if (!p.noPrev && (cur || prev)) {
         const dHrs = hrs(cur - prev);
         const up = dHrs >= 0;
         const pct = prev ? Math.round(100 * cur / prev) : null;
@@ -1654,14 +1935,65 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const totalAttrs =
       ` data-tip-title="${esc(catDisplay ? catDisplay + " — " : "")}${esc(p.label)}: ${hrs(totalSec)}h Logged"
          data-tip-body="${esc(tipBody)}"`;
+    // category/type cards: the entity's ALL-TIME hours as a share of every
+    // attributable hour — the "x% of all your time" line under Total Logged
+    let entAllSec = 0;
+    if (catKey)
+      for (const dayRows of Object.values(arch?.days ?? {}))
+        for (const [sec, act, cat, prod] of dayRows)
+          if (inCat(cat, prod, act)) entAllSec += sec;
+    // entity cards (v80): FOUR aligned columns on ONE grid — this period's
+    // hours with the entity's share OF THAT PERIOD right underneath, the
+    // entity's all-time hours with its share of ALL logged time underneath,
+    // then the trend and the prior period — every cell in the same
+    // "value + label" style as the Total Logged cell (user spec).
+    const entSummary = () => {
+      const gt = grandTotalSec(arch);
+      const perPct = p.total ? fmtPct(100 * totalSec / p.total) : null;
+      const allPct = gt ? fmtPct(100 * entAllSec / gt) : null;
+      const cell = (val, label, cls = "", attrs = "") =>
+        `<div class="cat-label ent-cell${cls}"${attrs}>
+           <span class="cat-time">${val}</span><span class="cat-name">${esc(label)}</span></div>`;
+      const tip = (title, body) =>
+        ` data-tip-title="${esc(title)}" data-tip-body="${esc(body)}"`;
+      return `<div class="ent-grid">
+        ${cell(hrs(totalSec) + "h", "Total Logged", "", totalAttrs)}
+        ${cell(hrs(entAllSec) + "h", "Logged In Total", "",
+           tip(`${catDisplay}: ${hrs(entAllSec)}h All Time`, "All Recorded Data"))}
+        ${p.noPrev
+          ? `<div class="app-trend app-since">Since ${esc(p.range[0])}</div>`
+          : `<div class="app-trend"${totalAttrs}>${trend}</div>`}
+        ${p.noPrev ? "<div></div>"
+          : cell(hrs(prevTotSec) + "h", p.prevLabel, "", totalAttrs)}
+        ${perPct === null ? "<div></div>"
+          : cell(perPct + "%", "Of Your Time In This Period", " ent-share",
+              tip(`${perPct}% Of ${p.label}`,
+                `${hrs(totalSec)}h Of ${hrs(p.total)}h Logged In ${p.label}\n${catDisplay} Only`))}
+        ${allPct === null ? "<div></div>"
+          : cell(allPct + "%", "Of All Your Time", " ent-share",
+              tip(`${allPct}% Of All Your Time`,
+                `${hrs(entAllSec)}h Of ${hrs(gt)}h Total Logged\n${catDisplay} Across All Recorded Data`))}
+        <div></div><div></div></div>`;
+    };
+    // Total page (v81): an "Average Per Day" line right under Total Logged
+    // (mean across every day that has data), before the level bars
+    let avgCells = "";
+    if (p.noPrev && !catKey) {
+      let activeDays = 0;
+      for (const dayRows of Object.values(arch?.days ?? {}))
+        if (dayRows.length) activeDays++;
+      if (activeDays) {
+        const avgAttrs = ` data-tip-title="${esc(`${hrs(totalSec / activeDays)}h Average Per Day`)}"
+          data-tip-body="${esc(`${hrs(totalSec)}h Across ${activeDays} Days With Data`)}"`;
+        avgCells = textCell(hrs(totalSec / activeDays), "Average Per Day", "pt-bar", avgAttrs) +
+          `<div class="app-trend pt-trend"${avgAttrs}></div>`;
+      }
+    }
     const summaryRows = catKey
-      ? `<div class="app-period-row"${totalAttrs}>
-           ${textCell(hrs(totalSec), "Total Logged", "span-l")}
-           <div class="app-trend">${trend}</div>
-           ${textCell(hrs(prevTotSec), p.prevLabel, "span-r")}</div>`
+      ? entSummary()
       : textCell(hrs(totalSec), "Total Logged", "pt-bar", totalAttrs) +
         `<div class="app-trend pt-trend"${totalAttrs}>${trend}</div>` +
-        bucketRows.join("");
+        avgCells + bucketRows.join("");
     // two pulse rings, drawn exactly like the dashboard pulse card's rings
     // (total above, number inside, "Current"/"Prior" below): ring 1 = THIS
     // period, ring 2 = the PRIOR period, its caption naming what it shows
@@ -1681,19 +2013,25 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       catKey
         ? `<div class="period-top">
              <div class="period-top-rows">${summaryRows}</div></div>`
-        : `<div class="period-top ptgrid">${summaryRows}${pulseBlock("1", "Current")}${pulseBlock("2", "Prior")}</div>`,
+        : `<div class="period-top ptgrid${avgCells ? " ptgrid-total" : ""}">${summaryRows}${pulseBlock("1", "Current")}${p.noPrev ? "" : pulseBlock("2", "Prior")}</div>`,
       catKey
-        ? `<div class="period-apps fill"><div class="app-sec">Top Apps</div>
-             <div class="bar-list" id="periodApps"></div></div>`
+        ? `<div class="period-apps fill"><div class="app-sec">${appKey ? "App" : "Top Apps"}</div>
+             <div class="bar-list" id="periodApps"></div>
+             ${p.h24 ? "" : `<div class="pbot-chart" id="periodBot">
+               <canvas id="periodBotCanvas"></canvas></div>`}</div>`
         : `<div class="period-apps fill">
              <div class="tab-row" id="periodTabs">
                <div class="app-sec tab active" data-tab="apps">Apps</div>
                <div class="app-sec tab" data-tab="cats">Categories</div>
                <div class="app-sec tab" data-tab="types">Types</div>
-               ${p.h24 ? "" : `<div class="app-sec tab" data-tab="pulse">Pulse</div>
-               <div class="app-sec tab" data-tab="trends">Trends</div>`}
+               ${p.h24 ? "" : `<div class="app-sec tab" data-tab="pulse">Pulse</div>` +
+                 (p.noPrev
+                   ? `<div class="app-sec tab" data-tab="averages">Averages</div>`
+                   : `<div class="app-sec tab" data-tab="trends">Trends</div>`)}
              </div>
-             <div class="bar-list" id="periodApps"></div></div>`,
+             <div class="bar-list" id="periodApps"></div>
+             ${p.h24 ? "" : `<div class="pbot-chart" id="periodBot" hidden>
+               <canvas id="periodBotCanvas"></canvas></div>`}</div>`,
       ...(catMerged
         ? [`<div class="period-apps"><div class="app-sec">Combined Original Names</div>
              <div class="bar-list" id="catRawList"></div></div>`]
@@ -1701,9 +2039,15 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     ];
     document.getElementById("appDetailTitle").textContent = catDisplay
       ? `${catDisplay} — ${p.label}`
-      : `${p.label} — Hours Logged`;
+      : `${p.label} — Details`;
     document.getElementById("appDetailFresh").textContent = winText(p.range, p.h24);
-    periodTabChart?.destroy(); periodTabChart = null;   // canvas is replaced
+    // period switcher (v79): same entity, different period on click
+    setSwitch({
+      kind: appKey ? "app" : lvlKey ? "lvl" : catKey ? "cat" : "period",
+      key: appKey ?? lvlKey ?? catKey, display: catDisplay,
+      per: PER_OF_LABEL[p.label] ?? null,
+    });
+    destroyDetailCharts();   // canvases are replaced below
     document.getElementById("appDetailRows").innerHTML = rows.join("");
     // size the card to the page BEFORE rendering the lists, so the Top Apps
     // section knows exactly how much height it has to fill
@@ -1712,7 +2056,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     if (catMerged)
       renderBarList("catRawList", rawCatRows.slice(0, 5).map(([raw, e]) =>
         [raw, e.sec, e.prod,
-         `Original RescueTime Category — Renamed To ${catDisplay}\n` +
+         `Original RescueTime ${appKey ? "Name" : "Category"} — Renamed To ${catDisplay}\n` +
          `${hrs(e.sec)}h In ${p.label}`]));
     if (!catKey) {
       // ring-slice tooltips want activity-shaped rows — rebuild them from the
@@ -1725,53 +2069,154 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       };
       const lvTot = A => hrs(LEVELS.reduce((a, l) => a + A.lv[l], 0));
       document.getElementById("periodPulseTotal1").textContent = `${lvTot(curA)}h`;
-      document.getElementById("periodPulseTotal2").textContent = `${lvTot(prevA)}h`;
       periodPulseChart?.destroy();
       periodPulseChart = makeDonut("periodPulseRing1", "periodPulseNum1",
         curA.lv, actsOf(curA), n => n,
         `${p.label} Pulse — ${winText(p.range, p.h24)}`);
-      periodPulseChart2?.destroy();
-      periodPulseChart2 = makeDonut("periodPulseRing2", "periodPulseNum2",
-        prevA.lv, actsOf(prevA), n => n,
-        `${p.prevLabel} Pulse — ${winText(p.prevRange, p.prevH24)}`);
-      pulsePct("periodPulsePct1", curA.lv, prevA.lv, `From ${p.prevLabel}`,
-        `${p.label} Vs ${p.prevLabel}`);
-      // pulsePct hides itself when the previous period has no data — on this
-      // card the line must never vanish (user request), so say why instead
       const pctEl = document.getElementById("periodPulsePct1");
-      if (pctEl.hidden) {
+      if (p.noPrev) {
+        // Total page: no prior period exists — the ring's caption says what
+        // the single ring covers instead of a trend
         pctEl.hidden = false;
-        pctEl.textContent = `No Trend (${p.prevLabel})`;
-        pctEl.dataset.tipTitle = `No ${p.prevLabel} Data To Compare Against`;
-        pctEl.dataset.tipBody = `${p.label} Vs ${p.prevLabel}`;
+        pctEl.textContent = `Since ${p.range[0]}`;
+        pctEl.dataset.tipTitle = "All Recorded Data";
+        pctEl.dataset.tipBody = winText(p.range, p.h24);
+      } else {
+        document.getElementById("periodPulseTotal2").textContent = `${lvTot(prevA)}h`;
+        periodPulseChart2?.destroy();
+        periodPulseChart2 = makeDonut("periodPulseRing2", "periodPulseNum2",
+          prevA.lv, actsOf(prevA), n => n,
+          `${p.prevLabel} Pulse — ${winText(p.prevRange, p.prevH24)}`);
+        pulsePct("periodPulsePct1", curA.lv, prevA.lv, `From ${p.prevLabel}`,
+          `${p.label} Vs ${p.prevLabel}`);
+        // pulsePct hides itself when the previous period has no data — on this
+        // card the line must never vanish (user request), so say why instead
+        if (pctEl.hidden) {
+          pctEl.hidden = false;
+          pctEl.textContent = `No Trend (${p.prevLabel})`;
+          pctEl.dataset.tipTitle = `No ${p.prevLabel} Data To Compare Against`;
+          pctEl.dataset.tipBody = `${p.label} Vs ${p.prevLabel}`;
+        }
+        // ring 2's caption names the period it shows
+        const pctEl2 = document.getElementById("periodPulsePct2");
+        pctEl2.hidden = false;
+        pctEl2.textContent = p.prevLabel;
+        pctEl2.dataset.tipTitle = `${p.prevLabel} Pulse`;
+        pctEl2.dataset.tipBody = winText(p.prevRange, p.prevH24) || p.prevLabel;
       }
-      // ring 2's caption names the period it shows
-      const pctEl2 = document.getElementById("periodPulsePct2");
-      pctEl2.hidden = false;
-      pctEl2.textContent = p.prevLabel;
-      pctEl2.dataset.tipTitle = `${p.prevLabel} Pulse`;
-      pctEl2.dataset.tipBody = winText(p.prevRange, p.prevH24) || p.prevLabel;
     }
     // ---- the tabbed list (Apps / Categories / Types) — the list SCROLLS
     // inside the card (small themed scrollbar) instead of trimming rows, and
     // the site-wide 0.5 h floor now applies here too ----
     // apps: same bars, %-vs-previous-period labels and tooltips as the
     // dashboard's Top Apps cards; EVERY app ≥ 0.5 h, scrollable
+    // On the all-time pages (noPrev) there is no previous period, so the
+    // right-edge % is the entry's SHARE of every logged hour instead of a
+    // trend ("20% of my total time went to Games") — v81 user spec. The
+    // Apps list is also capped to the TOP 50 there (10+ years of apps).
+    const sharePctOf = sec => p.total ? fmtPct(100 * sec / p.total) + "%" : undefined;
     const appEntries = [...agg.values()]
       .filter(e => e.sec >= MIN_LOGGED_SEC)
       .sort((a, b) => b.sec - a.sec)
+      .slice(0, p.noPrev ? 50 : Infinity)
       .map(e => {
         const prevSec = prevAgg.get(e.name.toLowerCase())?.sec;
-        const pct = prevSec > 0 ? Math.round(100 * e.sec / prevSec) + "%" : "No Trend";
+        const pct = p.noPrev ? sharePctOf(e.sec)
+          : prevSec > 0 ? Math.round(100 * e.sec / prevSec) + "%" : "No Trend";
         return [e.name, e.sec, e.prod,
           `${catName(e.cat)} — ${NAMES[e.prod]}, ${hrs(e.sec)}h` +
-          (prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
-                       : `\nNot Used In ${p.prevLabel} (No Trend)`),
+          (p.noPrev ? `\n${pct} Of All Your Logged Time`
+            : prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                          : `\nNot Used In ${p.prevLabel} (No Trend)`),
           pct];
       });
     detailRefit = null;   // no fit-to-height trimming — the list scrolls
+    // ---- the BOTTOM graph (v77): one line per top app (category/type cards
+    // + the Apps tab) or per top category (the Categories tab) across THIS
+    // period — DAILY points up to ~2 months, WEEKLY points beyond (year
+    // cards). Shares trendChartCore, so lines read as % of the slice's
+    // total logged time with hours in the tooltip. ----
+    let botCache = null;
+    const botMaps = () => botCache ??= (() => {
+      const span = (new Date(p.range[1] + "T00:00:00")
+                  - new Date(p.range[0] + "T00:00:00")) / 864e5;
+      // v81: spans beyond ~3 years (the Total pages) bucket by HALF-YEAR
+      // (user spec for the all-time charts); 2 months..3 years by week
+      const half = span > 1100, weekly = !half && span > 62;
+      const lvM = new Map(), appM = new Map(), catM = new Map();
+      const appTot = new Map(), catTot = new Map();
+      for (const d = new Date(p.range[0] + "T00:00:00"); ; d.setDate(d.getDate() + 1)) {
+        const iso = isoOf(d.getTime());
+        if (iso > p.range[1]) break;
+        const key = half
+          ? `${d.getFullYear()}-${d.getMonth() < 6 ? "01" : "07"}-01`
+          : weekly
+          ? isoOf(weekStart(new Date(iso + "T00:00:00")).getTime()) : iso;
+        const l2 = lvM.get(key) ?? lvM.set(key, emptyLevels()).get(key);
+        const am = appM.get(key) ?? appM.set(key, new Map()).get(key);
+        const cm = catM.get(key) ?? catM.set(key, new Map()).get(key);
+        for (const [sec, act, cat, prod] of rowsOf(iso)) {
+          // the denominator stays ALL logged time of the slice (site-wide
+          // % style), whatever entity filter applies to the lines
+          if (LEVELS.includes(String(prod))) l2[String(prod)] += sec;
+          const cn = catName(cat);
+          cm.set(cn, (cm.get(cn) ?? 0) + sec);
+          catTot.set(cn, (catTot.get(cn) ?? 0) + sec);
+          if (!inCat(cat, prod, act)) continue;   // app lines: the ENTITY's apps
+          const an = appName(act);
+          am.set(an, (am.get(an) ?? 0) + sec);
+          appTot.set(an, (appTot.get(an) ?? 0) + sec);
+        }
+      }
+      const keys = [...lvM.keys()];
+      const labels = [], tips = [];
+      keys.forEach((k, i) => {
+        const d = new Date(k + "T00:00:00");
+        if (half) {
+          const h = d.getMonth() < 6 ? 1 : 2;
+          labels.push(`H${h} ${String(d.getFullYear()).slice(2)}`);
+          tips.push(`H${h} ${d.getFullYear()} (${h === 1 ? "January – June" : "July – December"})`);
+        } else if (weekly) {
+          const wn = isoWeekNum(d);
+          const th = new Date(d); th.setDate(d.getDate() + 3);
+          labels.push(`W${wn}`);
+          tips.push(`Week ${wn} ${th.getFullYear()} (From ${k})`);
+        } else {
+          labels.push((i === 0 || d.getDate() === 1)
+            ? `${d.getDate()}.${d.getMonth() + 1}` : String(d.getDate()));
+          tips.push(d.toLocaleDateString(undefined,
+            { weekday: "short", day: "numeric", month: "short", year: "numeric" }));
+        }
+      });
+      const top10 = m => [...m.entries()].sort((a, b) => b[1] - a[1])
+        .slice(0, 10).map(([n]) => n);
+      return { keys, labels, tips, lvM, appM, catM,
+               topApps: top10(appTot), topCats: top10(catTot) };
+    })();
+    const botGraph = what => {
+      const K = botMaps();
+      return trendChartCore("periodBotCanvas", { keys: K.keys,
+        labels: K.labels, tips: K.tips, lvMap: K.lvM,
+        catMap: what === "apps" ? K.appM : K.catM,
+        topCats: what === "apps" ? K.topApps : K.topCats,
+        what: "cats", pointR: 2, legendScale: 1 });
+    };
+    // list entries linked to the graph: every APP / CATEGORY row opens its
+    // own detail page for THIS period (entry[5] nav descriptor) and carries
+    // the square matching its line colour below (entry[6] — invisible when
+    // the app/category isn't on the graph)
+    const withMeta = (entries, tops, kind) => entries.map(en => {
+      const i = tops ? tops.indexOf(en[0]) : -1;
+      return [...en, { kind, key: en[0], period: p.label },
+        tops ? (i >= 0 ? CAT_COLORS[i % CAT_COLORS.length] : null) : undefined];
+    });
+    const appMeta = entries =>
+      withMeta(entries, p.h24 ? null : botMaps().topApps, "app");
+    const catMeta = entries =>
+      withMeta(entries, p.h24 ? null : botMaps().topCats, "cat");
     if (catKey) {
-      renderBarList("periodApps", appEntries);
+      renderBarList("periodApps", appMeta(appEntries));
+      if (!p.h24) periodTabChart = botGraph("apps");
       return;
     }
     // categories: exact totals from the RAW category sums, merged by display
@@ -1799,14 +2244,16 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       .sort((a, b) => b.sec - a.sec)
       .map(c => {
         const prevSec = prevCatAgg.get(c.name.toLowerCase());
-        const pct = prevSec > 0 ? Math.round(100 * c.sec / prevSec) + "%" : "No Trend";
+        const pct = p.noPrev ? sharePctOf(c.sec)
+          : prevSec > 0 ? Math.round(100 * c.sec / prevSec) + "%" : "No Trend";
         const tops = (appsByCat.get(c.name.toLowerCase()) ?? [])
           .sort((x, y) => y[1] - x[1]).slice(0, 5)
           .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
         return [c.name, c.sec, c.prod,
           `${NAMES[c.prod]}, ${hrs(c.sec)}h` +
-          (prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
-                       : `\nNothing Logged In ${p.prevLabel} (No Trend)`) +
+          (p.noPrev ? `\n${pct} Of All Your Logged Time`
+            : prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                          : `\nNothing Logged In ${p.prevLabel} (No Trend)`) +
           (tops ? "\n" + tops : ""), pct];
       });
     // types: one bar per productivity level (Very Productive .. Very
@@ -1814,14 +2261,17 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const typeEntries = LEVELS
       .map(l => {
         const sec = curA.lv[l], prevSec = prevA.lv[l];
-        const pct = prevSec > 0 ? Math.round(100 * sec / prevSec) + "%" : "No Trend";
+        const pct = p.noPrev ? sharePctOf(sec)
+          : prevSec > 0 ? Math.round(100 * sec / prevSec) + "%" : "No Trend";
         const tops = [...(curA.apps[l] ?? [])].sort((x, y) => y[1] - x[1]).slice(0, 5)
           .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
         return [NAMES[l], sec, l,
           `${hrs(sec)}h ${NAMES[l]}` +
-          (prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
-                       : `\nNothing Logged In ${p.prevLabel} (No Trend)`) +
-          (tops ? "\n" + tops : ""), pct];
+          (p.noPrev ? `\n${pct} Of All Your Logged Time`
+            : prevSec > 0 ? `\n${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                          : `\nNothing Logged In ${p.prevLabel} (No Trend)`) +
+          (tops ? "\n" + tops : ""), pct,
+          { kind: "lvl", key: l, period: p.label }];
       })
       .sort((a, b) => b[1] - a[1]);
     // the Types tab appends a COMBINED section under the five level bars:
@@ -1838,7 +2288,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const maxC = Math.max(1, ...combos.map(([, ls]) => sum(curA, ls)));
       const html = combos.map(([label, ls, names]) => {
         const sec = sum(curA, ls), prevSec = sum(prevA, ls);
-        const pct = prevSec > 0 ? Math.round(100 * sec / prevSec) + "%" : "No Trend";
+        const pct = p.noPrev ? (sharePctOf(sec) ?? "")
+          : prevSec > 0 ? Math.round(100 * sec / prevSec) + "%" : "No Trend";
         const segs = ls.map(l =>
           `<div class="seg" style="flex:${curA.lv[l]} 1 0;background:${COLORS[l]}"></div>`).join("");
         const m = new Map();
@@ -1849,11 +2300,12 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         return `<div class="cat-row"
             data-tip-title="${esc(`${label}: ${hrs(sec)}h`)}"
             data-tip-body="${esc(names + "\n" +
-              (prevSec > 0 ? `${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
-                           : `Nothing Logged In ${p.prevLabel} (No Trend)`) +
+              (p.noPrev ? `${pct || "–"} Of All Your Logged Time`
+                : prevSec > 0 ? `${pct} Of ${p.prevLabel} (${hrs(prevSec)}h)`
+                              : `Nothing Logged In ${p.prevLabel} (No Trend)`) +
               (tops ? "\n" + tops : ""))}">
             <div class="cat-bar stackbar" style="width:${(100 * sec / maxC).toFixed(1)}%">${segs}</div>
-            <div class="cat-label pct"><span class="cat-time">${pct}</span></div>
+            ${pct ? `<div class="cat-label pct"><span class="cat-time">${pct}</span></div>` : ""}
             <div class="cat-label"><span class="cat-time">${hrs(sec)}h</span><span class="cat-name">${esc(label)}</span></div>
           </div>`;
       }).join("");
@@ -1870,6 +2322,116 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         `<div class="types-combined"><div class="app-sec">Combined</div>${html}</div>`);
       if (!p.h24) periodTabChart = periodGraph("periodTrendCanvas", "types");
     };
+    // ---- AVERAGES tab (v81, Total page only): mean logged hours per
+    // calendar month (across every year), per weekday, per time of day
+    // (Night/Morning/Afternoon/Evening — from the archive's per-day
+    // day_parts, filled by the v81 fetch script), plus each category's and
+    // type's average per day-with-data. ----
+    let avgCache = null;
+    const avgMaps = () => avgCache ??= (() => {
+      const monTot = new Map(), ymSeen = new Set();
+      const wdTot = Array(7).fill(0), wdCnt = Array(7).fill(0);
+      const catTot = new Map(), lvTot = emptyLevels();
+      let active = 0;
+      for (const [d, dayRows] of Object.entries(arch?.days ?? {})) {
+        let dTot = 0;
+        for (const [sec, , cat, prod] of dayRows) {
+          dTot += sec;
+          const cn = catName(cat), k = cn.toLowerCase();
+          const c = catTot.get(k) ?? { name: cn, sec: 0, top: 0, prod: String(prod) };
+          c.sec += sec;
+          if (sec > c.top) { c.top = sec; c.prod = String(prod); }
+          catTot.set(k, c);
+          if (LEVELS.includes(String(prod))) lvTot[String(prod)] += sec;
+        }
+        if (!dTot) continue;
+        active++;
+        const m = +d.slice(5, 7);
+        monTot.set(m, (monTot.get(m) ?? 0) + dTot);
+        ymSeen.add(d.slice(0, 7));
+        const wd = new Date(d + "T00:00:00").getDay();
+        wdTot[wd] += dTot; wdCnt[wd]++;
+      }
+      const ymCnt = new Map();   // month-of-year -> how many YYYY-MM instances
+      for (const ym of ymSeen) {
+        const m = +ym.slice(5, 7);
+        ymCnt.set(m, (ymCnt.get(m) ?? 0) + 1);
+      }
+      const parts = [0, 0, 0, 0];   // night, morning, afternoon, evening
+      let partDays = 0;
+      for (const arr of Object.values(arch?.day_parts ?? {})) {
+        if (!Array.isArray(arr) || !arr.some(s => s)) continue;
+        partDays++;
+        arr.forEach((s, i) => parts[i] += s || 0);
+      }
+      return { monTot, ymCnt, wdTot, wdCnt, catTot, lvTot, active, parts, partDays };
+    })();
+    const renderAveragesTab = () => {
+      const A = avgMaps();
+      const host = document.getElementById("periodApps");
+      if (!A.active) {
+        host.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">No Data</div>';
+        return;
+      }
+      const secHtml = (title, id) =>
+        `<div class="app-sec">${title}</div><div class="avg-list" id="${id}"></div>`;
+      host.innerHTML =
+        secHtml("Average Logged Hours Per Month", "avgMonths") +
+        secHtml("Average Logged Hours Per Weekday", "avgDays") +
+        secHtml("Average Logged Hours Per Time Of Day", "avgParts") +
+        secHtml("Average Hours Per Day — Categories", "avgCats") +
+        secHtml("Average Hours Per Day — Types", "avgTypes");
+      const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+      // calendar months Jan..Dec: mean of that month's TOTALS across years
+      const monRows = [];
+      for (let m = 1; m <= 12; m++) {
+        const n = A.ymCnt.get(m);
+        if (!n) continue;
+        const name = cap(new Date(2000, m - 1, 1)
+          .toLocaleDateString(undefined, { month: "long" }));
+        monRows.push([name, A.monTot.get(m) / n, "0",
+          `Average Of ${n} ${name}${n > 1 ? "s" : ""} With Data\n` +
+          `${hrs(A.monTot.get(m))}h Total`]);
+      }
+      renderBarList("avgMonths", monRows);
+      // weekdays Monday..Sunday: mean per day WITH data
+      const wdRows = [];
+      for (const wd of [1, 2, 3, 4, 5, 6, 0]) {
+        if (!A.wdCnt[wd]) continue;
+        const name = cap(new Date(2001, 0, wd === 0 ? 7 : wd)   // 2001-01-01 = Monday
+          .toLocaleDateString(undefined, { weekday: "long" }));
+        wdRows.push([name, A.wdTot[wd] / A.wdCnt[wd], "0",
+          `Across ${A.wdCnt[wd]} ${name}s With Data\n${hrs(A.wdTot[wd])}h Total`]);
+      }
+      renderBarList("avgDays", wdRows);
+      // time of day, from the archive's hourly-derived day_parts
+      if (A.partDays) {
+        const PARTS = [["Night", "0:00 – 6:00"], ["Morning", "6:00 – 12:00"],
+                       ["Afternoon", "12:00 – 18:00"], ["Evening", "18:00 – 24:00"]];
+        renderBarList("avgParts", PARTS.map(([nm, span], i) =>
+          [nm, A.parts[i] / A.partDays, "0",
+           `${span}\nAverage Across ${A.partDays} Days With Hourly Data\n` +
+           `${hrs(A.parts[i])}h Total`]));
+      } else {
+        document.getElementById("avgParts").innerHTML =
+          `<div style="color:var(--text-dim);font-size:0.8rem">No Hourly History Yet — ` +
+          `Rebuild The Archive With The Updated Fetch Script To Fill ` +
+          `Night / Morning / Afternoon / Evening</div>`;
+      }
+      // every category's and type's average per day-with-data; rows open
+      // that entity's own Total page
+      renderBarList("avgCats", [...A.catTot.values()]
+        .filter(c => c.sec >= MIN_LOGGED_SEC)
+        .sort((a, b) => b.sec - a.sec)
+        .map(c => [c.name, c.sec / A.active, c.prod,
+          `${hrs(c.sec)}h Total Across ${A.active} Days With Data`,
+          undefined, { kind: "cat", key: c.name, period: "Total" }]));
+      renderBarList("avgTypes", LEVELS
+        .map(l => [NAMES[l], A.lvTot[l] / A.active, l,
+          `${hrs(A.lvTot[l])}h Total Across ${A.active} Days With Data`,
+          undefined, { kind: "lvl", key: l, period: "Total" }])
+        .sort((a, b) => b[1] - a[1]));
+    };
     // ---- graphs for THIS period: x = the DAYS of the period (or its
     // MONTHS when the period spans more than ~2 months, e.g. year cards).
     // Used by the Pulse tab (pulse + type shares), the Trends tab (top-10
@@ -1878,12 +2440,14 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const periodKeysMaps = () => pkmCache ??= (() => {
       const span = (new Date(p.range[1] + "T00:00:00")
                   - new Date(p.range[0] + "T00:00:00")) / 864e5;
-      const monthly = span > 62;
+      // v81: half-year buckets beyond ~3 years (the Total pages' x-axis)
+      const half = span > 1100, monthly = !half && span > 62;
       const lvM = new Map(), catM = new Map(), totM = new Map();
       for (const d = new Date(p.range[0] + "T00:00:00"); ; d.setDate(d.getDate() + 1)) {
         const iso = isoOf(d.getTime());
         if (iso > p.range[1]) break;
-        const key = monthly ? iso.slice(0, 7) : iso;
+        const key = half ? iso.slice(0, 4) + (iso.slice(5, 7) < "07" ? "-01" : "-07")
+          : monthly ? iso.slice(0, 7) : iso;
         const l2 = lvM.get(key) ?? lvM.set(key, emptyLevels()).get(key);
         const cm = catM.get(key) ?? catM.set(key, new Map()).get(key);
         for (const [sec, , cat, prod] of rowsOf(iso)) {
@@ -1897,7 +2461,12 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const labels = [], tips = [];
       const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
       keys.forEach((k, i) => {
-        if (monthly) {
+        if (half) {
+          const d = new Date(k + "-01T00:00:00");
+          const h = d.getMonth() < 6 ? 1 : 2;
+          labels.push(`H${h} ${String(d.getFullYear()).slice(2)}`);
+          tips.push(`H${h} ${d.getFullYear()} (${h === 1 ? "January – June" : "July – December"})`);
+        } else if (monthly) {
           const d = new Date(k + "-01T00:00:00");
           const short = cap(d.toLocaleDateString(undefined, { month: "short" }));
           labels.push((i === 0 || d.getMonth() === 0)
@@ -1926,11 +2495,22 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       host.innerHTML = `<div class="ptab-chart"><canvas id="periodTrendCanvas"></canvas></div>`;
       periodTabChart = periodGraph("periodTrendCanvas", what);
     };
-    const TABS = { apps: () => renderBarList("periodApps", appEntries),
-                   cats: () => renderBarList("periodApps", catEntries),
+    // the Apps and Categories tabs carry the bottom graph (v77); the other
+    // tabs hide it again — its canvas persists, only the chart is rebuilt
+    const showBot = what => {
+      const bot = document.getElementById("periodBot");
+      if (!bot) return;
+      bot.hidden = false;
+      periodTabChart = botGraph(what);
+    };
+    const TABS = { apps: () => { renderBarList("periodApps", appMeta(appEntries));
+                                 showBot("apps"); },
+                   cats: () => { renderBarList("periodApps", catMeta(catEntries));
+                                 showBot("cats"); },
                    types: renderTypesTab,
                    pulse: () => renderPeriodGraphTab("pulse"),
-                   trends: () => renderPeriodGraphTab("cats") };
+                   trends: () => renderPeriodGraphTab("cats"),
+                   averages: renderAveragesTab };
     const tabRow = document.getElementById("periodTabs");
     tabRow.addEventListener("click", e => {
       const t = e.target.closest(".tab");
@@ -1939,6 +2519,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       tabRow.querySelectorAll(".tab").forEach(x =>
         x.classList.toggle("active", x === t));
       periodTabChart?.destroy(); periodTabChart = null;
+      const bot = document.getElementById("periodBot");
+      if (bot) bot.hidden = true;
       document.getElementById("periodApps").classList.remove("types-flex");
       TABS[t.dataset.tab]();
       document.getElementById("periodApps").scrollTop = 0;
@@ -2159,6 +2741,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   //      each with a Pulse and a Categories tab) picking ONE graph that
   //      fills the whole card ----
   async function showTrendsDetail(initial) {
+    destroyDetailCharts();   // the card may currently hold another view's charts
+    setSwitch(null);         // the period switcher is for entity/period pages only
     const T = await trendData();
     document.getElementById("appDetailTitle").textContent =
       "Trends — Pulse Over Time";
@@ -2256,6 +2840,21 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     showTrendsDetail();
   }, true);
 
+  // ---- every APP / CATEGORY / TYPE row in a bar list is a BUTTON that
+  // opens that entity's detail page for the row's own period (v78) —
+  // renderBarList marks them with data-nav-*. The % text at the row's
+  // right edge keeps its trend-button behaviour, and the capture phase
+  // beats the card-level click handlers (trend-zone cards, the detail
+  // card's click-to-close). ----
+  document.addEventListener("click", e => {
+    if (e.target.closest?.(".cat-label.pct")) return;   // trend button wins
+    const row = e.target.closest?.(".cat-row[data-nav-kind]");
+    if (!row) return;
+    e.stopPropagation();
+    e.preventDefault();
+    openEntity(row.dataset.navKind, row.dataset.navKey, row.dataset.navPeriod);
+  }, true);
+
   // =========================================================================
   // Past 7/30-day top-apps + top-categories cards — merged in from
   // Weeks-Months.html so every overlay floats over ONE page.
@@ -2284,7 +2883,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // tipExtra(nameKey) returns extra tooltip lines (per-day / per-week
     // breakdowns); prev = {apps, cats} maps of the PREVIOUS period for the
     // left-anchored %-vs-previous labels.
-    function renderPeriod(rows, appElId, catElId, tipExtra, prev) {
+    function renderPeriod(rows, appElId, catElId, tipExtra, prev, perLabel) {
       const byName = new Map();   // merged by DISPLAY name (dictionary.json)
       for (const [, sec, , activity, cat, prod] of (rows ?? [])) {
         const name = appName(activity);
@@ -2309,7 +2908,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
             (pct === null ? "" : prevSec > 0
               ? `\n${pct} Of The Previous Period (${hrs(prevSec)}h)`
               : "\nNot Used In The Previous Period (No Trend)") +
-            (extra ? "\n" + extra : ""), pct];
+            (extra ? "\n" + extra : ""), pct,
+            { kind: "app", key: e.name, period: perLabel }];
         });
       renderBarList(appElId, apps);
 
@@ -2338,7 +2938,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
             (pct === null ? "" : prevSec > 0
               ? `${pct} Of The Previous Period (${hrs(prevSec)}h)\n`
               : "Nothing Logged In The Previous Period (No Trend)\n") + topApps,
-            pct];
+            pct, { kind: "cat", key: catName(name), period: perLabel }];
         })
         .sort((a, b) => b[1] - a[1])
         // ALWAYS keep the top 5; the 0.5 h floor only cuts rows beyond them
@@ -2428,9 +3028,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       // Past 7 days incl. today (rolling, like the pulse's week ring) —
       // curWkRows is the same merged per-day list the week donut uses
       const week7Rows = curWkRows.length ? curWkRows : data.week_activities;
-      renderPeriod(week7Rows, "appListWeek", "catListWeek", tip7, prev7);
+      renderPeriod(week7Rows, "appListWeek", "catListWeek", tip7, prev7,
+                   "Current 7 Days");
       // Past 30 days incl. today (rolling, like the pulse's month ring)
-      renderPeriod(data.month_activities, "appListMonth", "catListMonth", tip30, prev30);
+      renderPeriod(data.month_activities, "appListMonth", "catListMonth",
+                   tip30, prev30, "Current 30 Days");
       // total logged hours per period, anchored right on each title row
       const totOf = rows => (rows ?? []).reduce((s, r) => s + r[1], 0);
       const setTot = (id, sec, label) => {

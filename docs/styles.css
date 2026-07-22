@@ -297,6 +297,26 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
   font-size: 0.9rem; color: var(--text-dim); white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* "Change Period To:" switcher (v79): pill buttons under the detail-card
+   title on app / category / type / period pages — Week/Month/Year jump to
+   the CURRENT rolling windows (Current 7 Days / Current 30 Days / Current
+   Year), Total to all recorded data. Same recessed/active colours as the
+   browser-style tabs; the ACTIVE pill marks the period currently shown. */
+.pswitch {
+  display: flex; align-items: center; gap: 0.4em; flex-wrap: wrap;
+  margin-top: 0.55em;
+}
+.pswitch-label {
+  font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text-dim); margin-right: 0.3em;
+}
+.pswitch-btn {
+  cursor: pointer; font: inherit; font-size: 0.9rem;
+  padding: 0.25em 1em; border: 1px solid var(--panel-edge);
+  border-radius: 999px; background: var(--track); color: #6a6a6a;
+}
+.pswitch-btn:not(.active):hover { color: var(--text-dim); }
+.pswitch-btn.active { background: var(--panel-edge); color: var(--text); }
 /* the whole detail card runs LARGER type than the rest of the dashboard —
    it's a reading surface, not a widget tile */
 #appDetailCard .app-head h2 { font-size: 1.15rem; }
@@ -432,11 +452,78 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .bar-list.types-flex { display: flex; flex-direction: column; }
 .bar-list.types-flex > .cat-row { flex: 0 0 auto; }
 .types-combined { margin-top: auto; }
+/* ---- v77-78: app / category / type rows navigate to that entity's own
+   detail page, scoped to the row's period ---- */
+.cat-row[data-nav-kind] { cursor: pointer; }
+.cat-row[data-nav-kind]:hover .cat-name { text-decoration: underline; }
+/* colored square linking a list row to its line in the graph below it
+   (order 0 = in front of the hours; invisible squares keep the alignment) */
+.cat-dot {
+  order: 0; flex: 0 0 auto; width: 0.6em; height: 0.6em;
+  border-radius: 2px;
+}
+/* "x% of all your time" on the APP card (v80): a SECOND grid row inside
+   the Total halfCell — the % shares the hours column (same right edge as
+   the hours above it), the label shares the label column, both dimmed.
+   Explicit grid-columns push the pair onto their own row (the half's
+   3rd auto-slot is the "No Data" column). */
+.app-half .app-share { color: var(--text-dim); }
+.app-half .app-share.app-hours { grid-column: 1; }
+.app-half .app-share.row-label { grid-column: 2; }
+/* v80: entity-card (category / type / app-period) summary — four aligned
+   columns on ONE grid: [Xh Total Logged | Xh Logged In Total | trend |
+   Xh Prior], with the period-share and all-time-share cells right
+   underneath the first two, every cell in the same cat-label
+   "value + label" style as the Total Logged cell */
+.ent-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 1.2fr);
+  gap: 0 0.6em; align-items: center; padding: 0 0.3em;
+}
+.ent-grid .cat-label {
+  position: static; pointer-events: auto; height: 2rem; min-width: 0;
+}
+.ent-grid .cat-time { font-weight: 600; }
+.ent-grid .ent-share { color: var(--text-dim); }
+.ent-grid .app-trend {
+  display: flex; align-items: center; justify-content: center;
+  height: 2rem; overflow: visible; text-align: center;
+}
+/* v80: bars on the detail-page lists stop IN FRONT of the graph-colour
+   square instead of running under it — the card background stays visible
+   around the square. Rows without squares keep full-width bars; rows whose
+   square is invisible stop at the same edge so the list stays aligned. */
+.cat-row.dotted .cat-bar { max-width: calc(100% - 1.9em); }
+/* v81: the Total page's top grid has one extra row (Average Per Day), so
+   its pulse ring spans five rows instead of four */
+.ptgrid-total .period-pulse { grid-row: 1 / 6; }
+/* v81: Averages tab — plain bar sections inside the scrolling tab area
+   (NOT .bar-list: that class would grab the tab area's flex/scroll) */
+.avg-list { margin-bottom: 0.5em; }
+/* v81: app card — the period/month/year rows scroll in their own area;
+   Combined Original Names + the all-time graph stay pinned below them */
+.app-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent;
+}
+.app-scroll::-webkit-scrollbar { width: 6px; display: block; }
+.app-scroll::-webkit-scrollbar-track { background: transparent; }
+.app-scroll::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+.app-scroll::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+/* the bottom graph on category/type cards + the Apps/Categories tabs —
+   the height of one combined-trends graph; the list above it scrolls */
+.pbot-chart {
+  position: relative; flex: 0 0 auto; height: 13rem; margin-top: 0.4em;
+}
 /* every trend / %-vs-previous number is a BUTTON that opens the Trends
-   card — pointer cursor + underline/brighten on hover make that visible */
-.cat-label.pct { pointer-events: auto; cursor: pointer; }
+   card — pointer cursor + underline/brighten on hover make that visible.
+   Only the % TEXT is the button (v77): the label container spans the whole
+   row (inset 0), and with pointer-events it would swallow the row's own
+   click-to-app-detail everywhere, not just at the right edge. */
+.cat-label.pct { pointer-events: none; }
+.cat-label.pct .cat-time { pointer-events: auto; cursor: pointer; }
 .app-trend:not(.app-since), .pulse-pct { cursor: pointer; }
-.cat-label.pct:hover, .app-trend:not(.app-since):hover, .pulse-pct:hover {
+.cat-label.pct .cat-time:hover, .app-trend:not(.app-since):hover, .pulse-pct:hover {
   text-decoration: underline; filter: brightness(1.25);
 }
 /* period card header (v62): ONE shared grid — bar cells | trends (directly

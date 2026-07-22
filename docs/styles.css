@@ -62,8 +62,9 @@ body {
 /* ---- pulse donuts: label lives INSIDE the hole, anchored to card top ----
    Every .donuts row = one narrow DATA column on the far left (bar labels now,
    maybe more numbers later) + the three period columns, so rows line up. */
-/* first column fits the spelled-out "Distracting" label + multi-line stats */
-.donuts { display: grid; grid-template-columns: 6em repeat(3, minmax(0, 1fr)); gap: clamp(4px, 1vw, 14px); }
+/* v82: the first column only holds the short "Prod"/"Dist" bar labels — the
+   hours-to-50 stats moved next to their rings, so it is very narrow now */
+.donuts { display: grid; grid-template-columns: 2.8em repeat(3, minmax(0, 1fr)); gap: clamp(4px, 1vw, 14px); }
 .donuts + .donuts { margin-top: 0.6em; }  /* gap between pulse rings and the bars */
 .label-col { min-width: 0; }
 /* one label per bar row, sized/spaced exactly like the .delta-row/.total-row
@@ -92,15 +93,17 @@ body {
   white-space: nowrap;
 }
 
-/* ---- hours-to-50 stat in the ring row's data column: the Distracting hours
-   today can still absorb before the pulse drops to 50 (flips to the
-   Productive hours needed when the pulse is below 50) ---- */
-.ring-stat-col {
-  display: flex; flex-direction: column; justify-content: flex-start;
+/* ---- hours-to-50 stats (v82): ONE per pulse ring, sitting directly to the
+   LEFT of its circle — the Distracting hours that window can still absorb
+   before its pulse drops to 50 (flips to the Productive hours needed when
+   the pulse is below 50). Value on top, "Dist/Prod Needed" hanging below. ----*/
+/* stat + ring ride in one centered flex row per period column */
+.ring-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: clamp(4px, 0.7vw, 12px);
 }
-/* the stat spans the same 92px band the rings occupy, so its value can sit
-   at the SAME HEIGHT as the pulse numbers inside the circles */
-.ring-stat { min-width: 0; height: min(92px, 100%); display: flex; align-items: center; }
+.ring-row .pulse-wrap { margin: 0; flex: 0 0 min(92px, 56%); }
+.ring-stat { min-width: 0; display: flex; align-items: center; }
 .ring-stat .stat-inner { position: relative; transform: translateY(-0.35rem); }
 .ring-stat-val {
   font-size: 0.8rem; font-weight: 600; color: var(--text);  /* = card title size */

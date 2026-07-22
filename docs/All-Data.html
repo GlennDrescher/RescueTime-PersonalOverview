@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=81">
+<link rel="stylesheet" href="styles.css?v=82">
 
 </head>
 <body>
@@ -47,60 +47,78 @@
          far left (row labels for the bars now; more numbers later) + the three
          period columns. -->
     <div class="donuts">
-      <div class="label-col ring-stat-col">
-        <!-- Hours until the PAST-7-DAYS pulse would hit 50: the Distracting
-             time still addable while above 50 (red), or the Productive time
-             needed while below it (blue). Value = same size and height as
-             the pulse numbers; the label hangs below like the ring labels. -->
-        <div class="ring-stat" id="to50Today" hidden>
-          <div class="stat-inner">
-            <div class="ring-stat-val big" id="to50Val">–</div>
-            <div class="row-label multi" id="to50Word">Distracting<br>Time Needed<br>To 50</div>
-          </div>
-        </div>
-      </div>
+      <!-- v82: the first column is just a narrow spacer now — every ring
+           carries its OWN hours-to-50 stat directly to its left: the
+           Distracting time that window can still absorb while its pulse is
+           at/above 50 (red), or the Productive time needed to lift it back
+           to 50 (blue). Value on top, "Dist/Prod + Needed" below. -->
+      <div class="label-col"></div>
       <!-- inside each ring: total logged hours ABOVE the pulse number (same
            style as the period label BELOW it) -->
       <div class="donut-col">
-        <div class="pulse-wrap">
-          <canvas id="donutToday"></canvas>
-          <div class="pulse-center"><div class="pulse-inner">
-            <div class="pulse-label" id="totalToday">–</div>
-            <div class="pulse-num" id="numToday">–</div>
-            <div class="pulse-label" id="labelToday">–</div>
-          </div></div>
+        <div class="ring-row">
+          <div class="ring-stat" id="to50_24h" hidden>
+            <div class="stat-inner">
+              <div class="ring-stat-val big" id="to50Val_24h">–</div>
+              <div class="row-label multi" id="to50Word_24h">Dist<br>Needed</div>
+            </div>
+          </div>
+          <div class="pulse-wrap">
+            <canvas id="donutToday"></canvas>
+            <div class="pulse-center"><div class="pulse-inner">
+              <div class="pulse-label" id="totalToday">–</div>
+              <div class="pulse-num" id="numToday">–</div>
+              <div class="pulse-label" id="labelToday">–</div>
+            </div></div>
+          </div>
         </div>
         <div class="pulse-pct" id="pct24h" hidden></div>
       </div>
       <div class="donut-col">
-        <div class="pulse-wrap">
-          <canvas id="donutWeek"></canvas>
-          <div class="pulse-center"><div class="pulse-inner">
-            <div class="pulse-label" id="totalWeek">–</div>
-            <div class="pulse-num" id="numWeek">–</div>
-            <div class="pulse-label">7 Days</div>
-          </div></div>
+        <div class="ring-row">
+          <div class="ring-stat" id="to50_week" hidden>
+            <div class="stat-inner">
+              <div class="ring-stat-val big" id="to50Val_week">–</div>
+              <div class="row-label multi" id="to50Word_week">Dist<br>Needed</div>
+            </div>
+          </div>
+          <div class="pulse-wrap">
+            <canvas id="donutWeek"></canvas>
+            <div class="pulse-center"><div class="pulse-inner">
+              <div class="pulse-label" id="totalWeek">–</div>
+              <div class="pulse-num" id="numWeek">–</div>
+              <div class="pulse-label">7 Days</div>
+            </div></div>
+          </div>
         </div>
         <div class="pulse-pct" id="pctWeek" hidden></div>
       </div>
       <div class="donut-col">
-        <div class="pulse-wrap">
-          <canvas id="donutMonth"></canvas>
-          <div class="pulse-center"><div class="pulse-inner">
-            <div class="pulse-label" id="totalMonth">–</div>
-            <div class="pulse-num" id="numMonth">–</div>
-            <div class="pulse-label">30 Days</div>
-          </div></div>
+        <div class="ring-row">
+          <div class="ring-stat" id="to50_month" hidden>
+            <div class="stat-inner">
+              <div class="ring-stat-val big" id="to50Val_month">–</div>
+              <div class="row-label multi" id="to50Word_month">Dist<br>Needed</div>
+            </div>
+          </div>
+          <div class="pulse-wrap">
+            <canvas id="donutMonth"></canvas>
+            <div class="pulse-center"><div class="pulse-inner">
+              <div class="pulse-label" id="totalMonth">–</div>
+              <div class="pulse-num" id="numMonth">–</div>
+              <div class="pulse-label">30 Days</div>
+            </div></div>
+          </div>
         </div>
         <div class="pulse-pct" id="pctMonth" hidden></div>
       </div>
     </div>
     <div class="donuts">
       <!-- ONE set of bar labels for the whole card, aligned with the bar rows
-           of every period column. Order matches makeDeltas: Total, Prod, Dist. -->
+           of every period column. Short forms keep the column narrow (v82). -->
       <div class="label-col delta-label-col">
-        <div class="row-label">Productive</div>
-        <div class="row-label">Distracting</div>
+        <div class="row-label">Prod</div>
+        <div class="row-label">Dist</div>
       </div>
       <div class="donut-col"><div class="deltas" id="deltaToday"></div></div>
       <div class="donut-col"><div class="deltas" id="deltaWeek"></div></div>
@@ -538,33 +556,36 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   pulsePct("pctMonth", curMoLv, prevMoLv, "From Month Before",
     "Current 30 Days Vs The Prior 30 Days");
 
-  // ---- hours to pulse 50, next to the rings ----
+  // ---- hours to pulse 50, LEFT of each ring (v82 — one stat per pulse) ----
   // With WEIGHT mirrored around 0.5, pulse == 50 exactly when
   // 2·VeryProd + Prod == Dist + 2·VeryDist (Neutral sits ON the 50 line and
   // can never move the pulse across it). The surplus in plain-Distracting
-  // hours is S = 2·vp + p − d − 2·vd: while above 50 you could still add S
-  // hours of Distracting time today; below 50 you need |S| hours of
-  // Productive time to climb back to 50.
-  // Based on the PAST 7 DAYS — the same window as the 7-day pulse ring.
-  const to50Sec = 2 * curWkLv["2"] + curWkLv["1"] - curWkLv["-1"] - 2 * curWkLv["-2"];
-  if (LEVELS.some(l => curWkLv[l])) {
-    const down = to50Sec >= 0;           // at/above 50: show the Distracting budget
-    // AVERAGE PER DAY over the NEXT 7 days (the window rolls, so if the
-    // coming days otherwise match the recent average, this much weighted
-    // Productive/Distracting time per day moves the 7-day pulse to 50).
-    const h = hrs(Math.abs(to50Sec) / 7);
-    const el = document.getElementById("to50Today");
-    const valEl = document.getElementById("to50Val");
+  // hours is S = 2·vp + p − d − 2·vd: while at/above 50 that window could
+  // still absorb S hours of Distracting time; below 50 it needs |S| hours
+  // of Productive time to climb back to 50. The 24h stat is the WHOLE
+  // window; the 7/30-day stats are PER DAY over their rolling window.
+  const to50 = (sfx, lv, days, windowText) => {
+    const el = document.getElementById("to50_" + sfx);
+    if (!LEVELS.some(l => lv[l])) { el.hidden = true; return; }
+    const S = 2 * lv["2"] + lv["1"] - lv["-1"] - 2 * lv["-2"];
+    const down = S >= 0;                 // at/above 50: show the Distracting budget
+    const h = hrs(Math.abs(S) / days);
+    const valEl = document.getElementById("to50Val_" + sfx);
     valEl.textContent = h + "h";
     valEl.style.color = down ? "var(--vdist)" : "var(--pulse)";  // red = Dist, blue = Prod
-    document.getElementById("to50Word").innerHTML =
-      (down ? "Distracting" : "Productive") + "<br>Needed Per Day<br>To 50";
+    document.getElementById("to50Word_" + sfx).innerHTML =
+      (down ? "Dist" : "Prod") + "<br>Needed";
     el.hidden = false;
-    el.dataset.tipTitle = `${h}h ${down ? "Distracting" : "Productive"} Per Day Until The 7-Day Pulse Is 50`;
+    const perDay = days > 1 ? " Per Day" : "";
+    el.dataset.tipTitle =
+      `${h}h ${down ? "Distracting" : "Productive"}${perDay} Until The ${windowText} Pulse Is 50`;
     el.dataset.tipBody = down
-      ? "Distracting Time You Could Add Per Day Over The\nNext 7 Days (If They Otherwise Match Your Recent\nAverage) Before The Pulse Drops To 50.\nVery Distracting Counts Double."
-      : "Productive Time Needed Per Day Over The\nNext 7 Days (If They Otherwise Match Your Recent\nAverage) To Lift The Pulse To 50.\nVery Productive Counts Double.";
-  }
+      ? `Distracting Time This Window Can Still Absorb${perDay ? ` Over The\nNext ${days} Days (If It Otherwise Matches Its Recent Average)` : ""}\nBefore The ${windowText} Pulse Drops To 50.\nVery Distracting Counts Double.`
+      : `Productive Time Needed${perDay ? ` Per Day Over The\nNext ${days} Days (If The Window Otherwise Matches Its Recent Average)` : ""}\nTo Lift The ${windowText} Pulse To 50.\nVery Productive Counts Double.`;
+  };
+  to50("24h", lv24, 1, "24-Hour");
+  to50("week", curWkLv, 7, "7-Day");
+  to50("month", curMoLv, 30, "30-Day");
 
   // ---- 14-day card title row: "14 Days" | daily average | total ----
   const lv14avg = sumRange(daysAgo(13), now);

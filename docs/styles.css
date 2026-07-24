@@ -73,7 +73,7 @@ body {
   height: 1.6rem; margin: 0.15rem 0;
   display: flex; align-items: center;
 }
-.donut-col { text-align: center; min-width: 0; }
+.donut-col { text-align: center; min-width: 0; container-type: inline-size; }
 .pulse-wrap {
   position: relative; width: min(92px, 56%); aspect-ratio: 1;
   margin: 0 auto; container-type: inline-size;
@@ -179,6 +179,11 @@ body {
 .cat-bar.stackbar .seg { height: 100%; min-width: 0; }
 /* the %-vs-previous-period overlay label, anchored at the RIGHT edge */
 .cat-label.pct { justify-content: flex-end; }
+/* app-card bucket rows (v90): fixed-width grid columns so hours / weekday /
+   day / month / year align vertically across every row */
+.cat-label.cols { display: grid; justify-content: start; align-items: center; gap: 0.6em; }
+.cat-label.cols > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cat-label.cols .cat-time { text-align: right; order: 0; }  /* keep hours in the FIRST grid column */
 /* pulse-card delta bars: CENTERED under the ring; the symmetric segment
    order is emitted in the markup, so no row-reverse here */
 .cat-bar.center { left: 50%; right: auto; transform: translateX(-50%); flex-direction: row; }
@@ -225,10 +230,13 @@ body {
 
 /* ---- "% of the previous period" line under each pulse ring ---- */
 .pulse-pct {
-  margin-top: 0.55em; font-size: 0.8rem; font-weight: 600;  /* = card title size */
-  color: var(--text-dim); white-space: nowrap; overflow: hidden;
+  margin-top: 0.55em; font-weight: 600;
+  color: var(--text-dim); line-height: 1.25;
+  /* ~2x on wide widgets, but scales DOWN with the column so it never wraps */
+  white-space: nowrap; overflow: visible;
+  font-size: clamp(0.5rem, 10cqw, 1.6rem);
 }
-.pulse-pct .pct-arrow { font-size: 0.7rem; }
+.pulse-pct .pct-arrow { font-size: 1em; vertical-align: middle; }  /* trend arrow scales with the text */
 
 /* ---- app search card: the suggestion list AND the app detail card are
         OVERLAYS anchored below the search bar (position:absolute), floating

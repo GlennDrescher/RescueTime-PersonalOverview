@@ -5,7 +5,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=83">
+<link rel="stylesheet" href="styles.css?v=90">
+<link rel="icon" href="favicon.svg?v=90" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=90" sizes="32x32">
 
 </head>
 <body>
@@ -31,6 +33,7 @@
            recorded data. Hidden on the Trends pages. -->
       <div class="pswitch" id="periodSwitch" hidden>
         <span class="pswitch-label">Change Period To:</span>
+        <button type="button" class="pswitch-btn" data-per="day">Day</button>
         <button type="button" class="pswitch-btn" data-per="week">Week</button>
         <button type="button" class="pswitch-btn" data-per="month">Month</button>
         <button type="button" class="pswitch-btn" data-per="year">Year</button>
@@ -549,11 +552,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     el.dataset.tipTitle = `Pulse ${curP} Vs ${prevP} — ${pct}% Of The Previous Period`;
     el.dataset.tipBody = tipBody;
   };
-  pulsePct("pct24h", lv24, prev24Lv, "From Prior 24 Hours",
+  pulsePct("pct24h", lv24, prev24Lv, "Prior 24h",
     "Current 24 Hours (Rolling)\nVs The Prior 24 Hours");
-  pulsePct("pctWeek", curWkLv, prevWkLv, "From Week Before",
+  pulsePct("pctWeek", curWkLv, prevWkLv, "Prior Week",
     "Current 7 Days Vs The Prior 7 Days");
-  pulsePct("pctMonth", curMoLv, prevMoLv, "From Month Before",
+  pulsePct("pctMonth", curMoLv, prevMoLv, "Prior Month",
     "Current 30 Days Vs The Prior 30 Days");
 
   // ---- hours to pulse 50, LEFT of each ring (v82 — one stat per pulse) ----
@@ -797,7 +800,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const stats = [document.getElementById("avg14Head"),
                    document.getElementById("tot14Head")];
     const VIEWS = [[null, "14 Days"],
-      ["m-pulse", "Monthly Pulse"], ["m-cats", "Monthly Categories"]];
+      ["d-pulse", "14-Day Pulse"], ["d-cats", "14-Day Categories"]];
     let vi = 0, cyc = null;
     card14.addEventListener("click", async e => {
       e.stopPropagation();
@@ -1475,21 +1478,36 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const total = mk("Total", [first, isoD(now)], "No Prior Period",
                      ["0001-01-01", "0001-01-01"]);
     total.noPrev = true;
-    return {
-      week: mk("Current 7 Days", [isoD(addD(now, -6)), isoD(now)],
-               "Prior 7 Days", [isoD(addD(now, -13)), isoD(addD(now, -7))]),
-      month: mk("Current 30 Days", [isoD(addD(now, -29)), isoD(now)],
-                "Prior 30 Days", [isoD(addD(now, -59)), isoD(addD(now, -30))]),
-      year: mk("Current Year", [isoD(ys), isoD(now)],
-               "Past Year", [isoD(pys), isoD(addD(ys, -1))]),
-      total,
-    };
+    total.appBucket = "year";          // app card: one bar per YEAR
+    // "Day" = the ROLLING past 24 hours (hourly data), vs the prior 24 h. The
+    // app card's Day view buckets those hours into 2-hour blocks.
+    const sum24 = (back1, back0) => { let s = 0;
+      for (const [t, sec] of (data.hour_activities ?? [])) {
+        const ms = new Date(t).getTime();
+        if (ms > nowMs - back1 * 36e5 && ms <= nowMs - back0 * 36e5) s += sec;
+      }
+      return s; };
+    const day = { label: "Past 24 Hours", range: [isoD(addD(now, -1)), isoD(now)],
+      prevLabel: "Prior 24 Hours", prevRange: [isoD(addD(now, -2)), isoD(addD(now, -1))],
+      total: sum24(24, 0), prevTotal: sum24(48, 24), h24: [24, 0], prevH24: [48, 24],
+      appBucket: "hour2", rtUrl: null, alt: null, prio: 0 };
+    const week = mk("Current 7 Days", [isoD(addD(now, -6)), isoD(now)],
+                    "Prior 7 Days", [isoD(addD(now, -13)), isoD(addD(now, -7))]);
+    week.appBucket = "d14";            // app card: one bar per DAY, past 14 days
+    const month = mk("Current 30 Days", [isoD(addD(now, -29)), isoD(now)],
+                     "Prior 30 Days", [isoD(addD(now, -59)), isoD(addD(now, -30))]);
+    month.appBucket = "d2x15";        // one bar per 2 DAYS, past 30 days (15 bars)
+    const year = mk("Current Year", [isoD(ys), isoD(now)],
+                    "Past Year", [isoD(pys), isoD(addD(ys, -1))]);
+    year.appBucket = "mon";           // one bar per MONTH, past 12 months
+    return { day, week, month, year, total };
   });
   // which entity the open detail card shows — a switcher click reopens THE
   // SAME entity in the clicked period. per = the active button (null = none).
   let detailCtx = null;
   const switchEl = document.getElementById("periodSwitch");
-  const PER_OF_LABEL = { "Current 7 Days": "week", "Current 30 Days": "month",
+  const PER_OF_LABEL = { "Past 24 Hours": "day", "Current 7 Days": "week",
+                         "Current 30 Days": "month",
                          "Current Year": "year", "Total": "total" };
   const setSwitch = ctx => {
     detailCtx = ctx;
@@ -1515,283 +1533,10 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   // ---- the detail card: hours for ONE app across every period, with the
   //      trend vs the immediately preceding period of the same length ----
   async function showAppDetail(displayName) {
-    destroyDetailCharts();   // the card may currently hold another view's charts
-    const arch = await loadArchive();
-    // Per-APP history starts where the archive has actual per-app rows (the
-    // seeded archive also carries older level-only days that can't answer
-    // per-app questions — those must not count as available history).
-    const appDayKeys = Object.keys(arch?.days ?? {}).sort();
-    const histStart = appDayKeys[0] ?? data.history_start ?? null;
-    const key = displayName.toLowerCase();
-    // per-day seconds for this app (merged by display name)
-    const perDay = new Map();
-    for (const [d, rows] of Object.entries(arch?.days ?? {}))
-      for (const [sec, act] of rows)
-        if (appName(act).toLowerCase() === key)
-          perDay.set(d, (perDay.get(d) ?? 0) + sec);
-    const sum = (a, b) => {   // inclusive ISO-string range
-      let s = 0;
-      for (const [d, sec] of perDay) if (d >= a && d <= b) s += sec;
-      return s;
-    };
-    const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-    const isoD = d => isoOf(d.getTime());
-    const todayIso = isoD(now);
-    const ws = weekStart(now);
-    const ms = monthStart(now);
-    const pm = new Date(ms); pm.setMonth(pm.getMonth() - 1);
-    const ys = new Date(now.getFullYear(), 0, 1);
-    const pys = new Date(now.getFullYear() - 1, 0, 1);
-    // One LINE per pair: current period | trend | previous period.
-    // Calendar pairs are interleaved with the ROLLING windows — "Past 24
-    // Hours" comes from the hourly rows (the same acts24/actsPrev24 the
-    // pulse card uses), "Past 7/30 Days" from the per-day archive.
-    const sumH = rows => { let s = 0;
-      for (const [, sec, , act] of rows) if (appName(act).toLowerCase() === key) s += sec;
-      return s; };
-    const hasHourly = (data.hour_activities ?? []).length > 0;
-    const H24 = { h24cur:  hasHourly ? sumH(acts24)     : null,
-                  h24prev: hasHourly ? sumH(actsPrev24) : null };
-    const lines = [
-      ["Today",      [todayIso, todayIso],
-       "Yesterday",  [isoD(addD(now, -1)), isoD(addD(now, -1))]],
-      ["Current 24 Hours", "h24cur",       // rolling, hourly data (last ~48 h)
-       "Prior 24 Hours", "h24prev"],
-      ["This Week",  [isoD(ws), todayIso],
-       "Past Week",  [isoD(addD(ws, -7)), isoD(addD(ws, -1))]],
-      ["Current 7 Days",  [isoD(addD(now, -6)), todayIso],
-       "Prior 7 Days", [isoD(addD(now, -13)), isoD(addD(now, -7))]],
-      ["This Month", [isoD(ms), todayIso],
-       "Past Month", [isoD(pm), isoD(addD(ms, -1))]],
-      ["Current 30 Days",  [isoD(addD(now, -29)), todayIso],
-       "Prior 30 Days", [isoD(addD(now, -59)), isoD(addD(now, -30))]],
-      ["This Year",  [isoD(ys), todayIso],
-       "Past Year",  [isoD(pys), isoD(addD(ys, -1))]],
-    ];
-    // null = the whole period predates the archive's app history — or, for
-    // the 24h windows, data.json carries no hourly rows at all
-    const cellVal = r => typeof r === "string" ? H24[r]
-      : (histStart && r[1] < histStart) ? null : sum(r[0], r[1]);
-    const spanText = (L, r) => typeof r === "string"
-      ? `${L}: Rolling Window (Hourly Data)`
-      : `${L}: ${r[0] === r[1] ? r[0] : r[0] + " — " + r[1]}`;
-    // one HALF = hours LEFT of the name (the site-wide "Xh Name" order).
-    // No data: the hours slot stays a blank space and a dim "No Data" sits
-    // at the right edge — where "Not Available" used to be.
-    const halfCell = (side, label, v, attrs = "") =>
-      `<div class="app-half ${side}"${attrs}>
-         <div class="app-hours">${v === null ? "" : hrs(v) + "h"}</div>
-         <div class="row-label">${esc(label)}</div>
-         ${v === null ? `<div class="app-na">No Data</div>` : ""}</div>`;
-    const rows = lines.map(([curL, curR, prevL, prevR]) => {
-      const cur = cellVal(curR), prev = cellVal(prevR);
-      let trend = "", tipTrend = "No Comparison Available";
-      if (cur !== null && prev !== null && (cur || prev)) {
-        const dHrs = hrs(cur - prev);
-        const up = dHrs >= 0;
-        const pct = prev ? Math.round(100 * cur / prev) : null;
-        trend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
-                 ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
-        tipTrend = `${curL} Is ${up ? "+" : ""}${dHrs}h Vs ${prevL}` +
-                   (pct !== null ? ` (${pct}%)` : "");
-      }
-      const partial = histStart &&
-        ((cur !== null && Array.isArray(curR) && curR[0] < histStart) ||
-         (prev !== null && Array.isArray(prevR) && prevR[0] < histStart));
-      const tipBody =
-        spanText(curL, curR) + "\n" + spanText(prevL, prevR) + "\n" +
-        (partial ? `Partial — App History Starts ${histStart}\n` : "") + tipTrend;
-      return `<div class="app-period-row" data-tip-title="${esc(curL)} Vs ${esc(prevL)}"
-                data-tip-body="${esc(tipBody)}">
-                ${halfCell("hl", curL, cur)}
-                <div class="app-trend">${trend}</div>
-                ${halfCell("hr", prevL, prev)}</div>`;
-    });
-    // total logged hours as the FIRST row, above Today (user request) — with
-    // the app's share of ALL logged time as a SECOND grid row of the SAME
-    // halfCell (v80), so the % right-aligns exactly under the hours
-    const total = sum(histStart ?? "0000-01-01", todayIso);
-    const gtAll = grandTotalSec(arch);
-    const sharePct = gtAll ? fmtPct(100 * total / gtAll) : null;
-    const shareTip = sharePct === null ? "" :
-      ` data-tip-title="${esc(`${sharePct}% Of All Your Time`)}"
-        data-tip-body="${esc(`${hrs(total)}h Of ${hrs(gtAll)}h Total Logged\n` +
-          `${displayName} Across All Recorded Data`)}"`;
-    rows.unshift(`<div class="app-period-row" data-tip-title="Total: ${hrs(total)}h"
-      data-tip-body="${esc("All Recorded Data" + (histStart ? ` Since ${histStart}` : ""))}">
-      <div class="app-half hl">
-        <div class="app-hours">${total === null ? "" : hrs(total) + "h"}</div>
-        <div class="row-label">Total</div>
-        ${sharePct === null ? "" :
-          `<div class="app-hours app-share"${shareTip}>${sharePct}%</div>
-           <div class="row-label app-share"${shareTip}>Of All Your Time</div>`}
-      </div>
-      <div class="app-trend app-since">${histStart ? `Since ${esc(histStart)}` : ""}</div></div>`);
-
-    // ---- one HALF-cell per SPECIFIC month (past 12, left) and per YEAR
-    //      (right), sharing the SAME 5-column grid as the period rows above,
-    //      so every column edge lines up card-wide: months = cols 1-2 (like
-    //      Today), the month's trend dead-centre in col 3, years = cols 4-5
-    //      (like Yesterday). The year's own trend lives in its tooltip.
-    //      Tooltips + RescueTime click zones sit per HALF, not per row. ----
-    const statHalf = (side, label, range, prevRange, prevLabel, url) => {
-      const v = cellVal(range);
-      let trend = "", tipTrend = "No Comparison Available";
-      if (v !== null && prevRange) {
-        const pv = cellVal(prevRange);
-        if (pv !== null && (v || pv)) {
-          const dHrs = hrs(v - pv);
-          const up = dHrs >= 0;
-          const pct = pv ? Math.round(100 * v / pv) : null;
-          trend = `<span style="color:${up ? BLUE : RED}">${up ? "▲" : "▼"}
-                   ${up ? "+" : ""}${dHrs}h${pct !== null ? ` (${pct}%)` : ""}</span>`;
-          tipTrend = `${up ? "+" : ""}${dHrs}h Vs ${prevLabel}` +
-                     (pct !== null ? ` (${pct}%)` : "");
-        }
-      }
-      const partial = histStart && v !== null && range[0] < histStart;
-      const tipBody = `${range[0]} — ${range[1]}` +
-        (partial ? `\nPartial — App History Starts ${histStart}` : "") + `\n${tipTrend}`;
-      return { trend,
-        cell: halfCell(side, label, v,
-          ` data-tip-title="${esc(label)}: ${v === null ? "No Data" : hrs(v) + "h"}"
-                data-tip-body="${esc(tipBody)}"`) };
-    };
-    const monLabel = d => {   // month name only — the past 12 months are unambiguous
-      const s = d.toLocaleDateString(undefined, { month: "long" });
-      return s.charAt(0).toUpperCase() + s.slice(1);
-    };
-    const monthCells = [];
-    for (let i = 0; i < 12; i++) {
-      const s  = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const e  = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-      const ps = new Date(now.getFullYear(), now.getMonth() - i - 1, 1);
-      const pe = new Date(now.getFullYear(), now.getMonth() - i, 0);
-      monthCells.push(statHalf("hl", monLabel(s), [isoD(s), isoD(i === 0 ? now : e)],
-                               [isoD(ps), isoD(pe)], monLabel(ps),
-                               "https://www.rescuetime.com/dashboard/for/the/month/of/" + isoD(s)));
-    }
-    const yearCells = [];
-    const startYear = histStart ? +histStart.slice(0, 4) : now.getFullYear();
-    for (let y = now.getFullYear(); y >= startYear; y--) {
-      const s = new Date(y, 0, 1);
-      const e = y === now.getFullYear() ? now : new Date(y, 11, 31);
-      const prev = y - 1 >= startYear
-        ? [isoD(new Date(y - 1, 0, 1)), isoD(new Date(y - 1, 11, 31))] : null;
-      yearCells.push(statHalf("hr", String(y), [isoD(s), isoD(e)], prev, String(y - 1),
-                              `https://www.rescuetime.com/dashboard/for/the/year/of/${y}-01-01`));
-    }
-    const myRows = [];
-    for (let i = 0; i < Math.max(monthCells.length, yearCells.length); i++) {
-      const m = monthCells[i], y = yearCells[i];
-      myRows.push(`<div class="app-period-row my-row">
-        ${m ? m.cell : `<div class="app-half hl"></div>`}
-        <div class="app-trend">${m ? m.trend : ""}</div>
-        ${y ? y.cell : ""}</div>`);
-    }
-    rows.push(`<div class="period-apps">
-      <div class="app-period-row my-row my-heads">
-        <div class="app-sec hl">Past 12 Months</div>
-        <div></div>
-        <div class="app-sec hr">Years</div></div>
-      ${myRows.join("")}</div>`);
-    // ---- ORIGINAL RescueTime names the dictionary combines into this app
-    // (up to 5, all-time hours, standard bar rows) — only shown when the
-    // dictionary actually renames/merges something ----
-    const rawAgg = new Map();   // raw activity -> {sec, top, prod}
-    const addRaw = (act, sec, prod) => {
-      if (appName(act).toLowerCase() !== key) return;
-      const e = rawAgg.get(act) ?? { sec: 0, top: 0, prod: String(prod) };
-      e.sec += sec;
-      if (sec > e.top) { e.top = sec; e.prod = String(prod); }
-      rawAgg.set(act, e);
-    };
-    if (arch?.days) {
-      for (const dayRows of Object.values(arch.days))
-        for (const [sec, act, , prod] of dayRows) addRaw(act, sec, prod);
-    } else {
-      for (const [, sec, , act, , prod] of data.month_activities ?? []) addRaw(act, sec, prod);
-    }
-    const raws = [...rawAgg.entries()].sort((a, b) => b[1].sec - a[1].sec);
-    const isMerged = raws.length > 1 || (raws.length === 1 && raws[0][0] !== displayName);
-    document.getElementById("appDetailTitle").textContent =
-      `${displayName} — Details`;
-    // How recent the fetched data goes, anchored right on the title row.
-    const fetchedAt = arch?.updated_at ?? data.generated_at;
-    const lastDay = appDayKeys[appDayKeys.length - 1];
-    document.getElementById("appDetailFresh").textContent = fetchedAt
-      ? `Data Up To ${new Date(fetchedAt).toLocaleString()}`
-      : lastDay ? `Data Up To ${lastDay}` : "No Data";
-    // v81 layout: the period / month / year rows SCROLL in their own area;
-    // Combined Original Names and the app's ALL-TIME graph stay pinned at
-    // the bottom of the card, always visible (user spec)
-    document.getElementById("appDetailRows").innerHTML =
-      `<div class="app-scroll">${rows.join("")}</div>` +
-      (isMerged
-        ? `<div class="period-apps"><div class="app-sec">Combined Original Names</div>
-             <div class="bar-list" id="appRawList"></div></div>` : "") +
-      (histStart
-        ? `<div class="pbot-chart"><canvas id="appTotCanvas"></canvas></div>` : "");
-    if (isMerged)
-      renderBarList("appRawList", raws.slice(0, 5).map(([raw, e]) =>
-        [raw, e.sec, e.prod,
-         `Original RescueTime Name — Renamed To ${displayName}\n` +
-         `${hrs(e.sec)}h Across All Recorded Data`]));
-    // the all-periods app card IS the app's Total view (v79 switcher)
-    setSwitch({ kind: "app", key, display: displayName, per: "total" });
-    detailCard.hidden = false;
-    sizeDetailCard();      // full-page card, same bottom edge as the grid
-    detailRefit = null;    // no fit-to-height list on the app card
-    // ---- the pinned ALL-TIME graph (v81): this app's share of every
-    // logged hour, bucketed to the whole history's span — days up to two
-    // months, weeks up to ~3 years, HALF-YEARS beyond (Total-page rule) ----
-    if (histStart) {
-      const dayAll = new Map();   // day -> per-level totals of ALL rows (the % denominator)
-      for (const [d2, dayRows] of Object.entries(arch?.days ?? {})) {
-        const lv = dayAll.get(d2) ?? dayAll.set(d2, emptyLevels()).get(d2);
-        for (const [sec, , , prod] of dayRows)
-          if (LEVELS.includes(String(prod))) lv[String(prod)] += sec;
-      }
-      const spanD = (new Date(todayIso + "T00:00:00")
-                   - new Date(histStart + "T00:00:00")) / 864e5;
-      const half = spanD > 1100, weekly = !half && spanD > 62;
-      const lvM = new Map(), appM = new Map();
-      for (const d2 = new Date(histStart + "T00:00:00"); ; d2.setDate(d2.getDate() + 1)) {
-        const iso = isoOf(d2.getTime());
-        if (iso > todayIso) break;
-        const bk = half ? `${d2.getFullYear()}-${d2.getMonth() < 6 ? "01" : "07"}-01`
-          : weekly ? isoOf(weekStart(new Date(iso + "T00:00:00")).getTime()) : iso;
-        const l2 = lvM.get(bk) ?? lvM.set(bk, emptyLevels()).get(bk);
-        const am = appM.get(bk) ?? appM.set(bk, new Map()).get(bk);
-        const dl = dayAll.get(iso);
-        if (dl) for (const l of LEVELS) l2[l] += dl[l];
-        const s = perDay.get(iso);
-        if (s) am.set(displayName, (am.get(displayName) ?? 0) + s);
-      }
-      const keys = [...lvM.keys()];
-      const labels = [], tips = [];
-      keys.forEach((k, i) => {
-        const d2 = new Date(k + "T00:00:00");
-        if (half) {
-          const h = d2.getMonth() < 6 ? 1 : 2;
-          labels.push(`H${h} ${String(d2.getFullYear()).slice(2)}`);
-          tips.push(`H${h} ${d2.getFullYear()} (${h === 1 ? "January – June" : "July – December"})`);
-        } else if (weekly) {
-          const wn = isoWeekNum(d2);
-          const th = new Date(d2); th.setDate(d2.getDate() + 3);
-          labels.push(`W${wn}`);
-          tips.push(`Week ${wn} ${th.getFullYear()} (From ${k})`);
-        } else {
-          labels.push((i === 0 || d2.getDate() === 1)
-            ? `${d2.getDate()}.${d2.getMonth() + 1}` : String(d2.getDate()));
-          tips.push(d2.toLocaleDateString(undefined,
-            { weekday: "short", day: "numeric", month: "short", year: "numeric" }));
-        }
-      });
-      periodTabChart = trendChartCore("appTotCanvas", { keys, labels, tips,
-        lvMap: lvM, catMap: appM, topCats: [displayName],
-        what: "cats", pointR: 2, legendScale: 1 });
-    }
+    // v88: the app card IS the period-scoped app view for the all-time
+    // ("Total") period, so Total looks exactly like Day/Week/Month/Year.
+    const p = (await switchPeriods()).total;
+    return showPeriodDetail(p, "app:" + displayName.toLowerCase(), displayName);
   }
 
   // ---- the PERIOD detail card: same overlay as the app card — total logged
@@ -1987,7 +1732,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         ${p.noPrev ? "<div></div>"
           : cell(hrs(prevTotSec) + "h", p.prevLabel, "", totalAttrs)}
         ${perPct === null ? "<div></div>"
-          : cell(perPct + "%", "Of Your Time In This Period", " ent-share",
+          : cell(perPct + "%", "Of This Period", " ent-share",
               tip(`${perPct}% Of ${p.label}`,
                 `${hrs(totalSec)}h Of ${hrs(p.total)}h Logged In ${p.label}\n${catDisplay} Only`))}
         ${allPct === null ? "<div></div>"
@@ -2036,10 +1781,10 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
              <div class="period-top-rows">${summaryRows}</div></div>`
         : `<div class="period-top ptgrid${avgCells ? " ptgrid-total" : ""}">${summaryRows}${pulseBlock("1", "Current")}${p.noPrev ? "" : pulseBlock("2", "Prior")}</div>`,
       catKey
-        ? `<div class="period-apps fill"><div class="app-sec">${appKey ? "App" : "Top Apps"}</div>
+        ? `<div class="period-apps fill"><div class="app-sec">${appKey ? ({ hour2: "Usage Every 2 Hours For Past 24 Hours", d14: "Usage Per Day For Past 14 Days", d2x15: "Usage Every 2 Days For Past 30 Days", mon: "Usage Per Month For Past 12 Months", year: "Usage Per Year" }[p.appBucket] ?? "Hours Logged") : "Top Apps"}</div>
              <div class="bar-list" id="periodApps"></div>
-             ${p.h24 ? "" : `<div class="pbot-chart" id="periodBot">
-               <canvas id="periodBotCanvas"></canvas></div>`}</div>`
+             ${appKey || !p.h24 ? `<div class="pbot-chart" id="periodBot">
+               <canvas id="periodBotCanvas"></canvas></div>` : ""}</div>`
         : `<div class="period-apps fill">
              <div class="tab-row" id="periodTabs">
                <div class="app-sec tab active" data-tab="apps">Apps</div>
@@ -2203,8 +1948,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           labels.push(`W${wn}`);
           tips.push(`Week ${wn} ${th.getFullYear()} (From ${k})`);
         } else {
-          labels.push((i === 0 || d.getDate() === 1)
-            ? `${d.getDate()}.${d.getMonth() + 1}` : String(d.getDate()));
+          labels.push(String(d.getDate()));   // integer day, no ".month" decimal
           tips.push(d.toLocaleDateString(undefined,
             { weekday: "short", day: "numeric", month: "short", year: "numeric" }));
         }
@@ -2235,6 +1979,104 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       withMeta(entries, p.h24 ? null : botMaps().topApps, "app");
     const catMeta = entries =>
       withMeta(entries, p.h24 ? null : botMaps().topCats, "cat");
+    // ---- APP view (v88): the "Hours Logged" section becomes a TIME-SERIES —
+    // one bar per bucket of this app's hours, granularity set by the period
+    // (Day = hourly, Week = 14 days, Month = 30 days, Year = months, Total =
+    // years). The bottom graph plots the SAME hours as a line (period-card
+    // style). ----
+    if (appKey) {
+      const isoD = d => isoOf(d.getTime());
+      const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+      const pad = n => String(n).padStart(2, "0");
+      const WD = d => { const s = d.toLocaleDateString(undefined, { weekday: "long" }); return s.charAt(0).toUpperCase() + s.slice(1); };
+      const MO = d => { const s = d.toLocaleDateString(undefined, { month: "long" }); return s.charAt(0).toUpperCase() + s.slice(1); };
+      const moShort = d => { const s = d.toLocaleDateString(undefined, { month: "short" }); return s.charAt(0).toUpperCase() + s.slice(1); };
+      // per-day seconds for this app (display-merged) + its dominant level (bar colour)
+      const perDayApp = new Map(), lvSec = emptyLevels();
+      for (const [d, dr] of Object.entries(arch?.days ?? {}))
+        for (const [sec, act, , prod] of dr)
+          if (appName(act).toLowerCase() === appKey) {
+            perDayApp.set(d, (perDayApp.get(d) ?? 0) + sec);
+            if (LEVELS.includes(String(prod))) lvSec[String(prod)] += sec;
+          }
+      let appLvl = "0", bestL = -1;
+      for (const l of LEVELS) if (lvSec[l] > bestL) { bestL = lvSec[l]; appLvl = l; }
+      const bucket = p.appBucket ?? "d2x15";
+      // cells[i] = the ALIGNED text COLUMNS for row i (each its own grid cell,
+      // so weekday / day / month / year line up card-wide); axis = short chart
+      // x-labels; `template` = the row's CSS grid columns (hours + cells).
+      const cells = [], axis = [], tips = [], secs = [];
+      let template;
+      if (bucket === "hour2") {
+        // the ROLLING past 24 h split into 12 clock-aligned 2-hour blocks,
+        // from data.json's hourly rows (per app). baseMs = today's local midnight.
+        template = "3.8em 7em";                      // Hours | 2-hour range
+        const baseMs = now.getTime(), curH = new Date(nowMs).getHours();
+        const endHoff = (Math.floor(curH / 2) + 1) * 2;   // exclusive end (hours from midnight)
+        const sm = new Array(12).fill(0);
+        for (const [t, sec, , act] of (data.hour_activities ?? [])) {
+          if (appName(act).toLowerCase() !== appKey) continue;
+          const hoff = Math.round((new Date(t).getTime() - baseMs) / 36e5);
+          const k = Math.floor((hoff - (endHoff - 24)) / 2);
+          if (k >= 0 && k < 12) sm[k] += sec;
+        }
+        for (let k = 0; k < 12; k++) {
+          const sHoff = endHoff - 24 + 2 * k, sh = ((sHoff % 24) + 24) % 24, eh = sh + 2;
+          const d0 = new Date(baseMs + sHoff * 36e5);
+          secs.push(sm[k]);
+          cells.push([`${pad(sh)}:00 - ${pad(eh)}:00`]);
+          axis.push(pad(sh));
+          tips.push(`${WD(d0)} ${moShort(d0)} ${d0.getDate()}, ${pad(sh)}:00 – ${pad(eh)}:00`);
+        }
+      } else if (bucket === "d14") {
+        template = "3.8em 6em 2.4em 5.6em";           // Hours | Weekday | Day | Month
+        for (let i = 13; i >= 0; i--) {
+          const d = addD(now, -i);
+          secs.push(perDayApp.get(isoD(d)) ?? 0);
+          cells.push([WD(d), String(d.getDate()), MO(d)]);
+          axis.push(String(d.getDate()));
+          tips.push(`${WD(d)} ${MO(d)} ${d.getDate()}, ${d.getFullYear()}`);
+        }
+      } else if (bucket === "d2x15") {
+        // 15 two-day buckets over the past 30 days (newest = yesterday+today)
+        template = "3.8em 6em 4.4em 5.6em";           // Hours | Weekday | Day range | Month
+        for (let j = 14; j >= 0; j--) {
+          const older = addD(now, -(2 * j + 1)), newer = addD(now, -2 * j);
+          secs.push((perDayApp.get(isoD(older)) ?? 0) + (perDayApp.get(isoD(newer)) ?? 0));
+          cells.push([WD(older), `${older.getDate()} - ${newer.getDate()}`, MO(older)]);
+          axis.push(String(older.getDate()));
+          tips.push(`${older.getDate()} – ${newer.getDate()} ${MO(older)} ${older.getFullYear()}`);
+        }
+      } else if (bucket === "mon") {
+        template = "3.8em 5.6em 3.2em";               // Hours | Month | Year
+        for (let i = 11; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1), key = isoOf(d.getTime()).slice(0, 7);
+          let sec = 0; for (const [dd, ss] of perDayApp) if (dd.slice(0, 7) === key) sec += ss;
+          secs.push(sec);
+          cells.push([MO(d), String(d.getFullYear())]);
+          axis.push((i === 11 || d.getMonth() === 0) ? `${moShort(d)} ${String(d.getFullYear()).slice(2)}` : moShort(d));
+          tips.push(`${MO(d)} ${d.getFullYear()}`);
+        }
+      } else {   // "year"
+        template = "3.8em 3.4em";                     // Hours | Year
+        let minY = now.getFullYear();
+        for (const dd of perDayApp.keys()) { const y = +dd.slice(0, 4); if (y < minY) minY = y; }
+        for (let y = minY; y <= now.getFullYear(); y++) {
+          let sec = 0; for (const [dd, ss] of perDayApp) if (+dd.slice(0, 4) === y) sec += ss;
+          secs.push(sec); cells.push([String(y)]); axis.push(String(y)); tips.push(String(y));
+        }
+      }
+      const totalSecs = secs.reduce((a, b) => a + b, 0);
+      // bar list, most-recent bucket first, hours + aligned text columns
+      const listRows = secs.map((s, i) => ({ sec: s, cells: cells[i],
+        tipTitle: tips[i], tipBody: `${hrs(s)}h ${catDisplay}` })).reverse();
+      renderAppCols("periodApps", totalSecs > 0 ? listRows : [], template, appLvl);
+      if (totalSecs > 0)
+        periodTabChart = hoursLineChart("periodBotCanvas",
+          { labels: axis, tips, secs, name: catDisplay, color: COLORS[appLvl],
+            pointR: axis.length > 40 ? 1 : 2 });
+      return;
+    }
     if (catKey) {
       renderBarList("periodApps", appMeta(appEntries));
       if (!p.h24) periodTabChart = botGraph("apps");
@@ -2495,8 +2337,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           tips.push(`${cap(d.toLocaleDateString(undefined, { month: "long" }))} ${d.getFullYear()}`);
         } else {
           const d = new Date(k + "T00:00:00");
-          labels.push((i === 0 || d.getDate() === 1)
-            ? `${d.getDate()}.${d.getMonth() + 1}` : String(d.getDate()));
+          labels.push(String(d.getDate()));   // integer day, no ".month" decimal
           tips.push(d.toLocaleDateString(undefined,
             { weekday: "short", day: "numeric", month: "short", year: "numeric" }));
         }
@@ -2578,17 +2419,24 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       wKeyOf.set(startIso, startIso);
       wKeyOf.set(isoOf(newer.getTime()), startIso);
     }
-    const lv = { w: new Map(), m: new Map(), y: new Map() };
-    const cat = { w: new Map(), m: new Map(), y: new Map() };
-    const app = { w: new Map(), m: new Map(), y: new Map() };
+    // The 14-Day card's cycled graphs draw DAILY points for the past 14 days.
+    const dayKeys = [], dSet = new Set();
+    for (let i = 13; i >= 0; i--) {
+      const iso = isoOf(daysAgo(i).getTime());
+      dayKeys.push(iso); dSet.add(iso);
+    }
+    const lv = { d: new Map(), w: new Map(), m: new Map(), y: new Map() };
+    const cat = { d: new Map(), w: new Map(), m: new Map(), y: new Map() };
+    const app = { d: new Map(), w: new Map(), m: new Map(), y: new Map() };
     const catTot = new Map(), appTot = new Map();
     const keysOf = day => ({
+      d: dSet.has(day) ? day : undefined,   // the day itself, only within the 14-day window
       w: wKeyOf.get(day),          // undefined when the day is outside the 4-week window
       m: day.slice(0, 7), y: day.slice(0, 4) });
     const addLv = (day, l, sec) => {
       if (!LEVELS.includes(String(l))) return;
       const ks = keysOf(day);
-      for (const p of ["w", "m", "y"]) {
+      for (const p of ["d", "w", "m", "y"]) {
         if (ks[p] == null) continue;   // day not in this period's window
         const m = lv[p].get(ks[p]) ?? lv[p].set(ks[p], emptyLevels()).get(ks[p]);
         m[String(l)] += sec;
@@ -2597,7 +2445,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const addCat = (day, c, sec) => {
       const name = catName(c);
       const ks = keysOf(day);
-      for (const p of ["w", "m", "y"]) {
+      for (const p of ["d", "w", "m", "y"]) {
         if (ks[p] == null) continue;
         const m = cat[p].get(ks[p]) ?? cat[p].set(ks[p], new Map()).get(ks[p]);
         m.set(name, (m.get(name) ?? 0) + sec);
@@ -2607,7 +2455,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const addApp = (day, a, sec) => {
       const name = appName(a);
       const ks = keysOf(day);
-      for (const p of ["w", "m", "y"]) {
+      for (const p of ["d", "w", "m", "y"]) {
         if (ks[p] == null) continue;
         const m = app[p].get(ks[p]) ?? app[p].set(ks[p], new Map()).get(ks[p]);
         m.set(name, (m.get(name) ?? 0) + sec);
@@ -2634,11 +2482,72 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       .slice(0, 10).map(([n]) => n);
     const topApps = [...appTot.entries()].sort((a, b) => b[1] - a[1])
       .slice(0, 10).map(([n]) => n);
-    return { arch, keys: { w: weekKeys, m: monthKeys, y: yearKeys },
+    return { arch, keys: { d: dayKeys, w: weekKeys, m: monthKeys, y: yearKeys },
              lv, cat, app, topCats, topApps };
   });
   const CAT_COLORS = ["#5b9bd5", "#d64541", "#e8913a", "#8ac06a", "#b07fd6",
                       "#4fc1bf", "#d6719f", "#c9c95e", "#8c96a3", "#2563ae"];
+  // v90: app-card bucket list with ALIGNED columns — hours + N text columns
+  // laid out on a fixed CSS grid so weekday/day/month/year line up card-wide.
+  function renderAppCols(elId, rows, template, lvl) {
+    const host = document.getElementById(elId);
+    if (!rows.length) {
+      host.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem">No Data</div>';
+      return;
+    }
+    const max = Math.max(...rows.map(r => r.sec), 1);
+    host.innerHTML = rows.map(r => `
+      <div class="cat-row">
+        <div class="cat-bar" style="width:${(100 * r.sec / max).toFixed(1)}%;background:${COLORS[lvl]}"></div>
+        <div class="cat-label cols" style="grid-template-columns:${template}">
+          <span class="cat-time">${(r.sec / 3600).toFixed(1)}h</span>
+          ${r.cells.map(c => `<span>${esc(c)}</span>`).join("")}
+        </div>
+      </div>`).join("");
+    host.querySelectorAll(".cat-row").forEach((row, i) => {
+      row.dataset.tipTitle = rows[i].tipTitle ?? "";
+      row.dataset.tipBody = rows[i].tipBody ?? "";
+    });
+  }
+  // v88: a single-series HOURS line chart in the same visual style as the
+  // trend graphs (bottom-legend, right-side axis, grey grid) — used by the
+  // app card's "Hours Logged" section. cfg: labels, tips, secs (per bucket),
+  // name (app), color, pointR.
+  function hoursLineChart(canvasId, cfg) {
+    const { labels, tips, secs, name, color, pointR = 2, legendScale = 1 } = cfg;
+    const px = Math.round(
+      parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.8);
+    const hours = secs.map(s => +(s / 3600).toFixed(2));
+    const top = Math.max(0, ...hours);
+    // round the axis up to a clean 1/2/5 × 10^n step so the tallest point fits
+    const yMax = top <= 0 ? 1 : (() => {
+      const mag = Math.pow(10, Math.floor(Math.log10(top)));
+      const n = top / mag;
+      return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
+    })();
+    return new Chart(document.getElementById(canvasId), {
+      type: "line",
+      data: { labels, datasets: [{
+        label: name, data: hours, borderColor: color, backgroundColor: color,
+        pointRadius: pointR, pointHoverRadius: 5, borderWidth: 2, tension: 0.3 }] },
+      options: { responsive: true, maintainAspectRatio: false, ...NO_ANIM,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: true, position: "bottom",
+            labels: { color: "#909090", boxWidth: 7 * legendScale,
+              boxHeight: 7 * legendScale, font: { size: px * legendScale } } },
+          tooltip: { ...HTML_TOOLTIP, callbacks: {
+            title: c => tips[c[0].dataIndex] ?? "",
+            label: c => ` ${(+c.raw).toFixed(1)}h ${name}` } } },
+        scales: {
+          x: { grid: { display: false },
+               ticks: { color: "#909090", maxRotation: 0, autoSkip: true, font: { size: px } } },
+          y: { min: 0, max: yMax, position: "right",
+               grid: { color: "#333333" },
+               ticks: { color: "#909090", font: { size: px * 2 },
+                        callback: v => v + "h" } } } },
+    });
+  }
   // core renderer: draws ONE trend line chart from prepared per-key maps.
   // cfg: keys, labels, tips (base text — the core appends "— Xh Logged" /
   // "— No Data"), lvMap (levels per key), what = "pulse" | "cats",
@@ -2745,6 +2654,13 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const keys = T.keys[per];
     const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
     const keyLabel = (k, first) => {
+      if (per === "d") {                    // single day, past-14-days graphs
+        const d = new Date(k + "T00:00:00");
+        const wd = cap(d.toLocaleDateString(undefined, { weekday: "short" }));
+        const moS = cap(d.toLocaleDateString(undefined, { month: "short" }));
+        return { lbl: `${wd} ${d.getDate()}`,
+                 tip: `${cap(d.toLocaleDateString(undefined, { weekday: "long" }))} ${moS} ${d.getDate()} ${d.getFullYear()}` };
+      }
       if (per === "y") return { lbl: k, tip: k };
       if (per === "m") {
         const d = new Date(k + "-01T00:00:00");

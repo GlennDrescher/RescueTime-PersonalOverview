@@ -1,6 +1,17 @@
 {
   "_comment": "Display + TYPE overrides (this site only; RescueTime untouched). 'Apps': {OriginalName:[raw names], NewName, NewCategory?} - combine apps under one NewName and optionally assign a category; NewCategory omitted keeps RescueTime's category. 'Categories': {OriginalName:[raw names], NewName?, NewType?} - combine/rename categories and optionally re-type them; NewType one of Work|Productive|Neutral|Personal|Distracting, omitted keeps RescueTime's type. Matching is case-insensitive on the raw RescueTime names. Type/category changes take effect on the NEXT data fetch. No trailing commas!",
+
+  "_Categories_format": "{ \"OriginalName\": [\"raw name(s)\"], \"NewName\": \"Display Name\", \"type\": \"Work | Productive | Neutral | Personal | Distracting\" }",
+    "Categories": [
+      { "OriginalName": ["Software Development", "General Software Development", "Editing & IDEs"], "NewName": "Programming" },
+      { "OriginalName": ["Communication & Scheduling"], "NewName": "Communication" },
+      { "OriginalName": ["General Reference & Learning"], "NewName": "Research" },
+      { "OriginalName": ["General Utilities"], "NewName": "Utilities" }
+    ],
+
+  "Apps_format": "{ \"OriginalName\": [\"raw name(s)\"], \"NewName\": \"Display Name\", \"NewCategory\": \"existing category\", \"type\": \"Work | Productive | Neutral | Personal | Distracting\" }",
   "Apps": [
+    { "OriginalName": ["Sleep (offline)"], "NewName": "Sleep", "NewType": "Personal", "NewCategory": "Personal"},
     { "OriginalName": ["ffx", "ffx-2", "ffx&ffx-2_launcher", "ffx ffx-2_launcher"], "NewName": "Final Fantasy 10", "NewCategory": "Games" },
     { "OriginalName": ["rider64"], "NewName": "Rider" },
     { "OriginalName": ["unrealeditor"], "NewName": "Unreal Editor" },
@@ -44,7 +55,7 @@
     { "OriginalName": ["google.com"], "NewName": "Google Search" },
     { "OriginalName": ["drive.google.com"], "NewName": "Google Drive" },
     { "OriginalName": ["icloud.com"], "NewName": "iCloud" },
-    { "OriginalName": ["eso64", "eso"], "NewName": "Elder Scrolls Online" },
+    { "OriginalName": ["eso64", "eso"], "NewName": "Elder Scrolls Online", "NewCategory": "Games", "NewType": "Distracting" },
     { "OriginalName": ["bg3_dx11", "bg3", "baldur's gate 3"], "NewName": "Baldurs Gate 3" },
     { "OriginalName": ["witcher 3"], "NewName": "Witcher 3" },
     { "OriginalName": ["pathofexile_64steam", "pathofexilesteam", "path of building"], "NewName": "Path of Exile" },
@@ -87,12 +98,5 @@
     { "OriginalName": ["ccff7r-win64-shipping"], "NewName": "Final Fantasy 7 Crisis Core" },
     { "OriginalName": ["aocclient-win64-shipping"], "NewName": "Ashes of Creation" },
     { "OriginalName": ["facebook.com"], "NewName": "Facebook" }
-  ],
-  "Categories": [
-    { "OriginalName": ["Software Development", "General Software Development", "Editing & IDEs"], "NewName": "Programming" },
-    { "OriginalName": ["Communication & Scheduling"], "NewName": "Communication" },
-    { "OriginalName": ["General Reference & Learning"], "NewName": "Research" },
-    { "OriginalName": ["General Utilities"], "NewName": "Utilities" },
-    { "OriginalName": ["Sleep (Offline"], "NewName": "Sleep", "NewType": "Personal"}
   ]
 }

@@ -91,11 +91,21 @@ Matching is case-insensitive on the raw RescueTime names. Type/category changes 
 
 ## Run it locally (optional)
 
-On Windows, create a `Secrets.ini` in the repo root containing `key=YOUR_API_KEY`, then use the scripts in `scripts/`:
+On Windows, create a `Secrets.ini` in the repo root containing `key=YOUR_API_KEY`. The scripts split into two groups. Every script works no matter where the repo folder lives — they resolve all paths relative to their own location, never a hard-coded drive path.
 
-- `scripts\Fetch-Data.ps1` — runs the same fetch script the Action uses and updates `docs/` locally.
-- `scripts\"Serve Temporary Website.ps1"` — serves the site on localhost while the window stays open (for previewing changes).
-- `scripts\"Install and Start persistent Local Website.ps1"` — sets up a background server (restarts on login) plus a 30-minute auto-fetch, so the local site stays live and current on its own; `scripts\"Stop Local persistent Website.ps1"` undoes it.
+**`scripts\dev\` — work on the repo's own site + data (dev server on port 8000):**
+
+- `scripts\dev\Fetch-RescueTime-Data.ps1` — runs the same fetch script the Action uses and updates the repo's `docs/` locally.
+- `scripts\dev\Serve-Temporary-Website.ps1` — serves the repo's `docs/` on `http://localhost:8000` while the window stays open (for previewing changes).
+- `scripts\dev\Delete-Local-Data.ps1` — deletes the repo's `docs\archive.json` + `docs\data.json` so the next fetch does a full rebuild.
+
+**`scripts\` — the always-on background site (self-contained, on port 8010):**
+
+- `scripts\Install-Website-Locally.ps1` — sets up an always-on background server (restarts on login) plus a 30-minute auto-fetch. It's **self-contained**: everything it needs (site files, dictionary, data, a copy of the fetcher and of `Secrets.ini`) is copied into `%LOCALAPPDATA%\RescueTimeLocalSite` and served from there on `http://localhost:8010`, so your repo is never touched or locked. Because it uses a different port than the dev server, both can run at once. Re-run it after editing the dictionary/site to refresh that copy.
+- `scripts\Status-Local-Website.ps1` — read-only check you can run in your own cmd window: shows each task's state, when the fetch last ran and when it runs next, whether the server is answering on port 8010, and when the data was last refreshed.
+- `scripts\Delete-Local-Website.ps1` — stops the server, removes both scheduled tasks, and deletes the `%LOCALAPPDATA%\RescueTimeLocalSite` folder.
+
+Every script reports its outcome (green success / red failure with the reason) and auto-closes after 10 seconds, except the temporary server (open until you press Ctrl+C) and the status check (prints and returns).
 
 `Secrets.ini`, `docs/data.json` and `docs/archive.json` are gitignored, so local runs never push personal data.
 

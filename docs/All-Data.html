@@ -5,9 +5,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=111">
-<link rel="icon" href="favicon.svg?v=111" type="image/svg+xml">
-<link rel="icon" href="favicon.ico?v=111" sizes="32x32">
+<link rel="stylesheet" href="styles.css?v=123">
+<link rel="icon" href="favicon.svg?v=123" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=123" sizes="32x32">
 
 </head>
 <body>
@@ -221,7 +221,11 @@
 const LEVELS = ["2", "1", "0", "-1", "-2"];
 const COLORS = { "2": "#2563ae", "1": "#5b9bd5", "0": "#8c96a3", "-1": "#985bd5", "-2": "#b34d53" };
 const NAMES  = { "2": "Work", "1": "Productive", "0": "Neutral", "-1": "Personal", "-2": "Distracting" };
-const WEIGHT = { "2": 1, "1": 0.75, "0": 0.5, "-1": 0.25, "-2": 0 };
+// Pulse weights, mirrored around 0.5 (=pulse 50). Work +2 / Productive +1 on
+// the positive side; Distracting −2 on the negative side. Neutral AND Personal
+// both sit ON the 50 line (weight 0.5) — Personal is treated exactly like
+// Neutral, so it shows in the ring but never moves the pulse number.
+const WEIGHT = { "2": 1, "1": 0.75, "0": 0.5, "-1": 0.5, "-2": 0 };
 const BLUE = "#5b9bd5", RED = "#b34d53";
 const NO_ANIM = { animation: false, animations: false,
                   transitions: { resize: { animation: { duration: 0 } } } };
@@ -669,20 +673,20 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
 
   // ---- hours to pulse 50, LEFT of each ring (v82 — one stat per pulse) ----
   // With WEIGHT mirrored around 0.5, pulse == 50 exactly when
-  // 2·VeryProd + Prod == Dist + 2·VeryDist (Neutral sits ON the 50 line and
-  // can never move the pulse across it). The surplus in plain-Distracting
-  // hours is S = 2·vp + p − d − 2·vd: while at/above 50 that window could
-  // still absorb S hours of Distracting time; below 50 it needs |S| hours
-  // of Productive time to climb back to 50. The 24h stat is the WHOLE
-  // window; the 7/30-day stats are PER DAY over their rolling window.
+  // 2·Work + Prod == 2·Distracting (Neutral AND Personal sit ON the 50 line and
+  // can never move the pulse across it). The surplus is S = 2·Work + Prod −
+  // 2·Distracting: while at/above 50 that window could still absorb S hours of
+  // Distracting time; below 50 it needs |S| hours of Productive time to climb
+  // back to 50. The 24h stat is the WHOLE window; the 7/30-day stats are PER
+  // DAY over their rolling window.
   const to50 = (sfx, lv, days, windowText) => {
     const el = document.getElementById("to50_" + sfx);
     if (!LEVELS.some(l => lv[l])) { el.hidden = true; return; }
-    const S = 2 * lv["2"] + lv["1"] - lv["-1"] - 2 * lv["-2"];
+    const S = 2 * lv["2"] + lv["1"] - 2 * lv["-2"];
     const down = S >= 0;                 // at/above 50: show the Distracting budget
     const h = hrs(Math.abs(S) / days);
     const valEl = document.getElementById("to50Val_" + sfx);
-    valEl.textContent = h;   // no "h" suffix — bare number aligns with the pulse number
+    valEl.textContent = Math.round(h);   // whole hours — bare integer aligns with the pulse number (tooltip keeps the exact 0.1h value)
     valEl.style.color = down ? "var(--vdist)" : "var(--pulse)";  // red = Dist, blue = Prod
     // layout: "Need" / <number> / "Hours of" / "Productive"|"Distracting"
     document.getElementById("to50Word_" + sfx).textContent = down ? "Distracting" : "Productive";
@@ -736,6 +740,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     e.stopPropagation();
     showOfflineDetail();
   });
+  refreshOfflineIcon();   // red "+" on load if the 7-day calendar has empty hours
   const card24 = document.getElementById("card24h");
   card24.classList.add("trend-zone");
   card24.addEventListener("click", e => {
@@ -900,7 +905,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
              grid: { color: ctx => ctx.tick.value === 0 ? "#5a5a5a" : "#333333",
                      lineWidth: ctx => ctx.tick.value === 0 ? 2 : 1 },
              ticks: { color: "#909090", font: { size: tickPx },
-                      callback: v => Math.abs(v) + "h" } },
+                      callback: v => Math.round(Math.abs(v)) + "h" } },
       } },
   });
 
@@ -1379,20 +1384,43 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const wasHidden = sugEl.hidden;
     sugEl.hidden = false;
     if (wasHidden) sizeSugCard();
-    const build = list => `<h2 class="sug-title">Search Suggestions</h2>` +
+    // when the SAME display name appears in more than one group — e.g. a
+    // category AND a productivity type both called "Personal", or an app that
+    // shares a category's name — tag each row with what it is (App / Category /
+    // Type) so the otherwise-identical rows are tellable apart. Shown ONLY when
+    // the list actually holds a duplicate of that name (user request).
+    const sugTagKind = s =>
+      s.kind === "app" ? "App"
+      : s.kind === "cat" ? (String(s.key).startsWith("lvl:") ? "Type" : "Category")
+      : s.kind === "period" ? "Period"
+      : s.kind === "trends" ? "View" : "";
+    const sugBaseName = s =>
+      s.kind === "app" ? s.a.name
+      : s.kind === "cat" ? (s.bare ? s.c.name : (s.label ?? ""))
+      : s.kind === "period" ? s.p.label
+      : (s.label ?? "");
+    const build = list => {
+      const nameCount = {};
+      for (const s of list) {
+        const n = String(sugBaseName(s)).toLowerCase();
+        nameCount[n] = (nameCount[n] ?? 0) + 1;
+      }
+      const dupTag = s => nameCount[String(sugBaseName(s)).toLowerCase()] > 1
+        ? ` <span class="sug-unit">(${sugTagKind(s)})</span>` : "";
+      return `<h2 class="sug-title">Search Suggestions</h2>` +
       `<div class="sug-list">` + list.map((s, i) => {
       const open = `<div class="sug-row${i === sugIdx ? " active" : ""}" data-i="${i}">`;
       const row = s.kind === "trends"
         // a Trends view (Pulse / Categories / Apps over the past 4 weeks)
         ? `${open}
-             <span class="sug-name">${esc(s.label ?? "Trends")}</span>
+             <span class="sug-name">${esc(s.label ?? "Trends")}${dupTag(s)}</span>
              <span class="sug-hours"></span>
              <span class="sug-hours"><span class="sug-unit">Weekly Trends</span></span>
            </div>`
         : s.kind === "period"
         // periods: label left, the period's logged hours right
         ? `${open}
-             <span class="sug-name">${esc(s.p.label)}</span>
+             <span class="sug-name">${esc(s.p.label)}${dupTag(s)}</span>
              <span class="sug-hours"></span>
              <span class="sug-hours">${hrs(s.p.total)}h <span class="sug-unit">Logged</span></span>
            </div>`
@@ -1401,18 +1429,18 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         // a "<Category> — <Period>" combo shows that period's hours
         ? (s.bare
           ? `${open}
-               <span class="sug-name">${esc(s.alias ?? s.c.name)}${s.alias ? ` <span class="sug-unit">→ ${esc(s.c.name)}</span>` : ""}</span>
+               <span class="sug-name">${esc(s.alias ?? s.c.name)}${s.alias ? ` <span class="sug-unit">→ ${esc(s.c.name)}</span>` : ""}${dupTag(s)}</span>
                <span class="sug-hours">${hrs(s.c.last30)}h <span class="sug-unit">30d</span></span>
                <span class="sug-hours">${hrs(s.c.total)}h <span class="sug-unit">Total</span></span>
              </div>`
           : `${open}
-               <span class="sug-name">${esc(s.label)}</span>
+               <span class="sug-name">${esc(s.label)}${dupTag(s)}</span>
                <span class="sug-hours"></span>
                <span class="sug-hours">${hrs(s.sec)}h <span class="sug-unit">Logged</span></span>
              </div>`)
         // apps: name left; past-30-days and all-time hours right
         : `${open}
-             <span class="sug-name">${esc(s.a.name)}</span>
+             <span class="sug-name">${esc(s.a.name)}${dupTag(s)}</span>
              <span class="sug-hours">${hrs(s.a.last30)}h <span class="sug-unit">30d</span></span>
              <span class="sug-hours">${hrs(s.a.total)}h <span class="sug-unit">Total</span></span>
            </div>`;
@@ -1421,6 +1449,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       return (i === 0 || s.kind !== list[i - 1].kind
               ? `<div class="sug-head">${heads[s.kind]}</div>` : "") + row;
     }).join("") + `</div>`;
+    };
     sugEl.innerHTML = build(sugList);
     // cap the list to the card's fixed height: count the rows that fit, cut
     // sugList there (keeps ↑/↓ navigation in sync with what's visible) and
@@ -1528,8 +1557,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // special VIEWS on top: "Pulse"/"Trends" → Weekly Pulse, "Categories" →
     // Weekly Categories, "Apps" → Weekly Apps (all open the Trends card)
     const vwAll = [];
-    if (matchTier(q, "Pulse") > 0 || matchTier(q, "Trends") > 0)
-      vwAll.push({ kind: "trends", tab: "w-pulse", label: "Pulse" });
+    // "Pulse", "Trends" AND "Types" all land on the Trends page (its Pulse tab
+    // IS the productivity-types-over-time view) and are shown as ONE "Trends"
+    // suggestion, so typing any of them reads clearly instead of both saying "Pulse".
+    if (matchTier(q, "Pulse") > 0 || matchTier(q, "Trends") > 0 || matchTier(q, "Types") > 0)
+      vwAll.push({ kind: "trends", tab: "w-pulse", label: "Trends" });
     if (matchTier(q, "Categories") > 0)
       vwAll.push({ kind: "trends", tab: "w-cats", label: "Categories" });
     if (matchTier(q, "Apps") > 0)
@@ -1921,13 +1953,25 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
               if (LEVELS.includes(String(prod))) appLvSec[String(prod)] += sec;
             }
           }
-    let appCatLabel = "", appTypeLvl = null;
+    let appCatLabel = "", appTypeLvl = null, appCatLvl = null;
     if (appKey) {
       let bc = "", bcs = -1;
       for (const [c, s] of appCatSec) if (s > bcs) { bcs = s; bc = c; }
       appCatLabel = catName(bc);
       let bl = -1;
       for (const l of LEVELS) if (appLvSec[l] > bl) { bl = appLvSec[l]; appTypeLvl = l; }
+      // the CATEGORY's OWN colour = its dominant type across ALL its apps
+      // (e.g. Games → red, driven by every other game), which is INDEPENDENT
+      // of this one app's own dominant type (ESO → Personal). Scan the whole
+      // (already-translated) archive for rows in this category.
+      const catLv = emptyLevels();
+      for (const dayRows of Object.values(arch?.days ?? {}))
+        for (const row of dayRows)
+          if (row[2] === bc && LEVELS.includes(String(row[3])))
+            catLv[String(row[3])] += row[0];
+      let cl = -1;
+      for (const l of LEVELS) if (catLv[l] > cl) { cl = catLv[l]; appCatLvl = l; }
+      if (appCatLvl === null) appCatLvl = appTypeLvl;
     }
     // entity cards (v80): FOUR aligned columns on ONE grid — this period's
     // hours with the entity's share OF THAT PERIOD right underneath, the
@@ -1963,10 +2007,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           : cell(allPct + "%", "Of All Your Time", " ent-share ent-d",
               tip(`${allPct}% Of All Your Time`,
                 `${hrs(entAllSec)}h Of ${hrs(gt)}h Total Logged\n${catDisplay} Across All Recorded Data`))}
-        ${appKey && appTypeLvl !== null ? `<div class="ent-cat">
-             <span class="ent-catname" style="color:${COLORS[appTypeLvl]}">${esc(appCatLabel)}</span>
-             <span class="ent-cattype" style="color:${COLORS[appTypeLvl]}">${esc(NAMES[appTypeLvl])}</span>
-           </div>` : ""}
+        ${appKey && appTypeLvl !== null ? `
+          <div class="cat-label ent-cell ent-catcell" style="color:${COLORS[appTypeLvl]}"><span class="cat-name">${esc(NAMES[appTypeLvl])}</span></div>
+          <div class="cat-label ent-cell ent-typecell" style="color:${COLORS[appCatLvl]}"><span class="cat-name">${esc(appCatLabel)}</span></div>` : ""}
         </div>`;
     };
     // Total page (v81): an "Average Per Day" line right under Total Logged
@@ -2032,8 +2075,13 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         : []),
     ];
     document.getElementById("appDetailTitle").classList.remove("tc");
+    // show WHAT you're looking at in the title (App / Category / Type) so the
+    // three same-named entities — e.g. "Personal" the type vs the category vs
+    // an app — are tellable apart from the detail card, matching the tagged
+    // search suggestions.
+    const kindTag = appKey ? " (App)" : lvlKey ? " (Type)" : catKey ? " (Category)" : "";
     document.getElementById("appDetailTitle").textContent = catDisplay
-      ? `${catDisplay} — ${p.label}`
+      ? `${catDisplay}${kindTag} — ${p.label}`
       : `${p.label} — Details`;
     document.getElementById("appDetailFresh").textContent = winText(p.range, p.h24);
     // period switcher (v79): same entity, different period on click
@@ -2649,11 +2697,18 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   //      Pulse charts: Pulse (real 0-100) + Productive/Neutral/Distracting
   //      as % of the period's logged time. Category charts: top 10 all-time
   //      categories as % of the period's logged time. ----
-  let trendDataPromise = null;
-  const trendData = () => trendDataPromise ??= loadArchive().then(arch => {
+  // trendData(offsets): offsets = {h,w,m} shift each view's window back by whole
+  // spans (h=24h, w=4wk, m=12mo; 0 = current, negative = older). Cached per
+  // window so Prior/Next navigation and tab switches don't re-scan needlessly.
+  const trendDataCache = new Map();
+  const trendData = (offsets = {}) => {
+    const offH = offsets.h ?? 0, offW = offsets.w ?? 0, offM = offsets.m ?? 0;
+    const sig = offH + "," + offW + "," + offM;
+    if (trendDataCache.has(sig)) return trendDataCache.get(sig);
+    const promise = loadArchive().then(arch => {
     const monthKeys = [], weekKeys = [], yearKeys = [];
     for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const d = new Date(now.getFullYear(), now.getMonth() - i + 12 * offM, 1);
       monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
     }
     // The "Weekly" trends view is a rolling 4-week window drawn in 48-hour
@@ -2663,7 +2718,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // no "w" key and are skipped below.
     const wKeyOf = new Map();
     for (let j = 13; j >= 0; j--) {          // oldest bucket first, like the old week keys
-      const older = daysAgo(2 * j + 1), newer = daysAgo(2 * j);
+      const older = daysAgo(2 * j + 1 - 28 * offW), newer = daysAgo(2 * j - 28 * offW);
       const startIso = isoOf(older.getTime());
       weekKeys.push(startIso);
       wKeyOf.set(startIso, startIso);
@@ -2678,6 +2733,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const lv = { h: new Map(), d: new Map(), w: new Map(), m: new Map(), y: new Map() };
     const cat = { h: new Map(), d: new Map(), w: new Map(), m: new Map(), y: new Map() };
     const app = { h: new Map(), d: new Map(), w: new Map(), m: new Map(), y: new Map() };
+    // apps broken down BY LEVEL per key — feeds the bar-chart tooltip's top-5
+    // apps-per-level list, exactly like the 14-day card. { key -> { level -> Map(app->sec) } }
+    const appLv = { h: new Map(), d: new Map(), w: new Map(), m: new Map(), y: new Map() };
     const catTot = new Map(), appTot = new Map();
     const keysOf = day => ({
       d: dSet.has(day) ? day : undefined,   // the day itself, only within the 14-day window
@@ -2712,10 +2770,21 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       }
       appTot.set(name, (appTot.get(name) ?? 0) + sec);
     };
+    const addAppLv = (day, a, l, sec) => {
+      if (!LEVELS.includes(String(l))) return;
+      const name = appName(a), ks = keysOf(day);
+      for (const p of ["d", "w", "m", "y"]) {
+        if (ks[p] == null) continue;
+        const byKey = appLv[p].get(ks[p]) ?? appLv[p].set(ks[p], {}).get(ks[p]);
+        const m = (byKey[String(l)] ??= new Map());
+        m.set(name, (m.get(name) ?? 0) + sec);
+      }
+    };
     if (arch?.days || arch?.day_levels) {
       for (const [day, rows] of Object.entries(arch.days ?? {}))
         for (const [sec, act, c, prod] of rows) {
           addLv(day, prod, sec); addCat(day, c, sec); addApp(day, act, sec);
+          addAppLv(day, act, prod, sec);
         }
       for (const [day, l2] of Object.entries(arch.day_levels ?? {}))
         for (const [l, sec] of Object.entries(l2)) addLv(day, l, sec);
@@ -2735,11 +2804,12 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // rows (NOT the daily archive), keyed "YYYY-MM-DDTHH". topCats/topApps stay
     // the all-time tops. ----
     const hourKeys = [];
+    let hOldestMs = 0;
     const hKeyOf = ms => { const d = new Date(ms);
       return `${isoOf(d.getTime())}T${String(d.getHours()).padStart(2, "0")}`; };
     {
       const eh = new Date(nowMs); eh.setMinutes(0, 0, 0);   // top of the current hour
-      const endMs = eh.getTime(), oldestMs = endMs - 24 * 36e5;
+      const endMs = eh.getTime() + 24 * 36e5 * offH, oldestMs = hOldestMs = endMs - 24 * 36e5;
       for (let k = 0; k < 12; k++) hourKeys.push(hKeyOf(oldestMs + k * 2 * 36e5));
       const blockKeyOf = t => {
         const k = Math.floor((new Date(t).getTime() - oldestMs) / (2 * 36e5));
@@ -2758,6 +2828,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         const an = appName(act);
         const am = app.h.get(key) ?? app.h.set(key, new Map()).get(key);
         am.set(an, (am.get(an) ?? 0) + sec);
+        if (LEVELS.includes(String(prod))) {
+          const byKey = appLv.h.get(key) ?? appLv.h.set(key, {}).get(key);
+          const m = (byKey[String(prod)] ??= new Map());
+          m.set(an, (m.get(an) ?? 0) + sec);
+        }
       }
     }
     const topCats = [...catTot.entries()].sort((a, b) => b[1] - a[1])
@@ -2765,8 +2840,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const topApps = [...appTot.entries()].sort((a, b) => b[1] - a[1])
       .slice(0, 10).map(([n]) => n);
     return { arch, keys: { h: hourKeys, d: dayKeys, w: weekKeys, m: monthKeys, y: yearKeys },
-             lv, cat, app, topCats, topApps };
-  });
+             lv, cat, app, appLv, topCats, topApps, hOldestMs };
+    });
+    trendDataCache.set(sig, promise);
+    return promise;
+  };
   const CAT_COLORS = ["#5b9bd5", "#d64541", "#e8913a", "#8ac06a", "#b07fd6",
                       "#4fc1bf", "#d6719f", "#c9c95e", "#8c96a3", "#2563ae"];
   // v90: app-card bucket list with ALIGNED columns — hours + N text columns
@@ -2838,7 +2916,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   // the small 14-days card passes 1), pointR.
   function trendChartCore(canvasId, cfg) {
     const { keys, labels, lvMap, catMap, topCats, what,
-            legendScale = 2, pointR = 3, topN = 10 } = cfg;
+            legendScale = 1, pointR = 3, topN = 10 } = cfg;   // legend text SAME small size on every chart (was 2 on the big graphs)
     const totOf = l2 => l2 ? LEVELS.reduce((a, l) => a + l2[l], 0) : 0;
     const tots = keys.map(k => {
       const t = totOf(lvMap.get(k));
@@ -2854,29 +2932,21 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       borderWidth: 2, tension: 0.3, ...extra });
     let datasets, labelCb, tipFilter;
     if (what === "pulse") {
-      const val = f => keys.map((k, i) => tots[i] === null ? null
-        : +(100 * f(lvMap.get(k)) / tots[i]).toFixed(1));
-      const hours = keys.map((k, i) => tots[i] === null ? null : {
-        prod: prodOf(lvMap.get(k)), neut: lvMap.get(k)["0"],
-        dist: distOf(lvMap.get(k)) });
+      // Pulse (the metric) PLUS all FIVE types as their own line (Work &
+      // Personal included, not just the Productive/Distracting umbrellas),
+      // each in its own colour — each line = that type's % of the period.
+      const val = l => keys.map((k, i) => tots[i] === null ? null
+        : +(100 * lvMap.get(k)[l] / tots[i]).toFixed(1));
+      const secsOf = l => keys.map((k, i) => tots[i] === null ? null : lvMap.get(k)[l]);
       datasets = [
         // pulse in white so it reads as THE metric next to the level lines
         ds("Pulse", keys.map((k, i) => tots[i] === null ? null
              : pulseOf(lvMap.get(k))), "#e3e3e3", { borderWidth: 3 }),
-        ds("Productive", val(prodOf), COLORS["1"]),
-        ds("Neutral", val(l2 => l2["0"]), COLORS["0"]),
-        ds("Distracting", val(distOf), COLORS["-2"]),
+        ...LEVELS.map(l => ({ ...ds(NAMES[l], val(l), COLORS[l]), secs: secsOf(l) })),
       ];
-      labelCb = c => {
-        const h = hours[c.dataIndex];
-        if (!h) return "";
-        return c.dataset.label === "Pulse" ? ` Pulse ${c.raw}`
-          : c.dataset.label === "Productive"
-            ? ` ${hrs(h.prod)}h Productive (${c.raw}%)`
-          : c.dataset.label === "Neutral"
-            ? ` ${hrs(h.neut)}h Neutral (${c.raw}%)`
-            : ` ${hrs(h.dist)}h Distracting (${c.raw}%)`;
-      };
+      labelCb = c => c.dataset.label === "Pulse" ? ` Pulse ${c.raw}`
+        : ` ${hrs(c.dataset.secs?.[c.dataIndex] ?? 0)}h ${c.dataset.label} (${c.raw}%)`;
+      tipFilter = item => item.raw !== null && (item.dataset.label === "Pulse" || item.raw > 0);
     } else if (what === "types") {
       // one line per productivity TYPE — each level's share of the period
       const val = l => keys.map((k, i) => tots[i] === null ? null
@@ -2919,9 +2989,10 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           tooltip: { ...HTML_TOOLTIP, filter: tipFilter ?? (() => true),
             callbacks: { title: c => tips[c[0].dataIndex] ?? "", label: labelCb } } },
         scales: {
+          // x AND y axis text share ONE size = 2× the base chart-text size
+          // (px·2) — big & readable, matched to each other (user request).
           x: { grid: { display: false },
-               ticks: { color: "#909090", maxRotation: 0, font: { size: px } } },
-          // y-axis % at 2x base font, same grey as the rest of the page
+               ticks: { color: "#909090", maxRotation: 0, font: { size: px * 2 } } },
           y: { min: 0, max: yMax, position: "right",
                grid: { color: "#333333" },
                ticks: { color: "#909090", font: { size: px * 2 },
@@ -2978,15 +3049,18 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const lvMap = T.lv[per];
     const lvOf = k => lvMap.get(k) ?? emptyLevels();
     const upL = ["2", "1"], downL = ["0", "-1", "-2"];
+    const order = [...upL, ...downL];   // dataset index -> level (matches the 14-day card)
     const totSec = k => LEVELS.reduce((a, l) => a + lvOf(k)[l], 0);
-    const yMax = Math.max(1,
+    const yMax = Math.ceil(Math.max(1,   // ceil → whole-hour axis (no float-sum artefacts like 235.79999…h)
       ...keys.map(k => upL.reduce((a, l) => a + hrs(lvOf(k)[l]), 0)),
-      ...keys.map(k => downL.reduce((a, l) => a + hrs(lvOf(k)[l]), 0)));
+      ...keys.map(k => downL.reduce((a, l) => a + hrs(lvOf(k)[l]), 0))));
     const totals = keys.map(k => { const s = totSec(k); return s > 0 ? String(Math.round(hrs(s))) : ""; });
     const pulses = keys.map(k => totSec(k) > 0 ? String(pulseOf(lvOf(k))) : "");
     const tips = keys.map(k => trendKeyLabel(per, k, false).tip);
+    // axis + Total/Pulse row text = the standard chart-text size (0.8×root) — the
+    // 2× the base chart-text size — SAME as the line chart's x/y axes (px·2).
     const tickPx = Math.round(
-      parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.8);
+      parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.8) * 2;
     // "Total"/"Pulse" row labels + the coloured pulse numbers (drawn here, not
     // as ticks, so each can be blue >=50 / red <50) — mirrors the 14-day card
     const totLabel = {
@@ -3032,7 +3106,14 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         plugins: { legend: { display: false },
           tooltip: { ...HTML_TOOLTIP, callbacks: {
             title: c => tips[c[0].dataIndex] ?? "",
-            label: c => ` ${Math.abs(c.raw)}h ${c.dataset.label}` } } },
+            label: c => ` ${Math.abs(c.raw)}h ${c.dataset.label}`,
+            // top-5 apps of THIS level for THIS bucket — same as the 14-day card
+            afterLabel: c => {
+              const m = (T.appLv?.[per]?.get(keys[c.dataIndex]) ?? {})[order[c.datasetIndex]];
+              if (!m) return "";
+              return [...m].sort((a, b) => b[1] - a[1]).slice(0, 5)
+                .map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+            } } } },
         scales: {
           x: { stacked: true, grid: { display: false },
                ticks: { color: "#909090", maxRotation: 0, autoSkip: false,
@@ -3043,7 +3124,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
                grid: { color: ctx => ctx.tick.value === 0 ? "#5a5a5a" : "#333333",
                        lineWidth: ctx => ctx.tick.value === 0 ? 2 : 1 },
                ticks: { color: "#909090", font: { size: tickPx },
-                        callback: v => Math.abs(v) + "h" } },
+                        callback: v => Math.round(Math.abs(v)) + "h" } },
         } },
     });
   }
@@ -3051,7 +3132,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   // builds ONE trend chart onto canvasId and returns the Chart.
   // kind = "<w|m|y>-<pulse|cats>", e.g. "w-cats" = weekly top categories.
   async function buildTrendChart(canvasId, kind, opts = {}) {
-    const T = await trendData();
+    const T = await trendData(opts.offsets);
     const [per, what] = kind.split("-");
     const keys = T.keys[per];
     const labels = [], tips = [];
@@ -3083,6 +3164,56 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     detailCard.hidden = false;
     sizeDetailCard();
     detailRefit = null;
+  }
+
+  // ---- EMPTY-TIMESLOT NUDGE: colour the front-page "+" (#iconOffline) red
+  //      whenever any PAST hour in the 7-day calendar has nothing in it -
+  //      neither RescueTime-logged time NOR a manual/offline entry. The red
+  //      clears once every gap is filled. Mirrors renderTimeline()'s coverage
+  //      maths exactly (same 7-day window, same hour bucketing) so the icon and
+  //      the calendar always agree. Reads the offline entries straight from
+  //      localStorage so it works on first paint, before the Manual Activities
+  //      page (which owns `offlineEntries`) has ever been opened. ----
+  function countEmptyTimeslots() {
+    const HOUR = 36e5, DAY_HOURS = 24 * 7;
+    const topH = new Date(Date.now()); topH.setMinutes(0, 0, 0, 0);
+    const top = topH.getTime();
+    const idxOf = ms => Math.round((top - ms) / HOUR);
+    const covered = new Array(DAY_HOURS).fill(0);   // seconds in each hour bucket
+    // RescueTime-logged time (hourly rows the fetcher pulls for the last ~7 days)
+    for (const row of (data.hour_activities ?? [])) {
+      const d = new Date(row[0]); d.setMinutes(0, 0, 0, 0);
+      const i = idxOf(d.getTime());
+      if (i >= 0 && i < DAY_HOURS) covered[i] += row[1];
+    }
+    // manual/offline entries (each spread across every hour it covers)
+    let entries = [];
+    try { const s = JSON.parse(localStorage.getItem("rtOfflineEntries")); if (Array.isArray(s)) entries = s; } catch {}
+    for (const e of entries) {
+      let s = e.startMs; const end = e.startMs + e.durMin * 60000;
+      while (s < end) {
+        const hs = new Date(s); hs.setMinutes(0, 0, 0, 0);
+        const hStart = hs.getTime(), segEnd = Math.min(end, hStart + HOUR);
+        const i = idxOf(hStart);
+        if (i >= 0 && i < DAY_HOURS) covered[i] += (segEnd - s) / 1000;
+        s = segEnd;
+      }
+    }
+    // count empty PAST hours only: skip index 0 (the current, still-in-progress
+    // hour) and never look at the future (the window ends at `now`).
+    let empty = 0;
+    for (let i = 1; i < DAY_HOURS; i++) if (covered[i] <= 0) empty++;
+    return empty;
+  }
+  // toggle the red state + a helpful tooltip count on the front-page "+"
+  function refreshOfflineIcon() {
+    const btn = document.getElementById("iconOffline");
+    if (!btn) return;
+    const empty = countEmptyTimeslots();
+    btn.classList.toggle("needs-fill", empty > 0);
+    btn.title = empty > 0
+      ? `Manual Activities - ${empty} empty hour${empty === 1 ? "" : "s"} in the last 7 days`
+      : "Manual Activities";
   }
 
   // ---- OFFLINE ACTIVITIES page: LEFT = add-activity form (record offline time
@@ -3245,6 +3376,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           `<div class="oh-track" data-start="${s.start}" ${tipAttrs}>${segs}</div></div>`;
       }).join("");
       // click / drag selection is wired once on dayEl (delegated) below
+      refreshOfflineIcon();   // filling gaps here may clear the red front-page "+"
     }
 
     // scroll the calendar so the given day's rows are in view
@@ -3412,21 +3544,15 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       detailsText = ""; customMode = false; customName = "";
       renderForm();          // rebuilds the form (also calls renderRecent)
       renderTimeline();
-      uploadOffline(chunks, document.getElementById("offStatus"));
+      uploadOffline(chunks);
     }
 
-    async function uploadOffline(entries, statusEl) {
-      const total = entries.reduce((a, e) => a + e.durMin, 0);
-      const summary = entries.length > 1
-        ? `${entries.length} × ≤4h blocks (${entries[0].activity}, ${total}m total)`
-        : `"${entries[0].activity}" · ${entries[0].durMin}m · ${fmtClock(entries[0].startMs)}`;
-      if (!apiKey) {
-        statusEl.textContent = `Added ${summary} — saved in this browser. Add your RescueTime API key to sync.`;
-        return;
-      }
-      // RescueTime's API sends no CORS headers, so the browser can DELIVER a
-      // simple form POST but can't READ the response. We post each block
-      // (no-cors) and report it as sent — verify it landed in RescueTime.
+    async function uploadOffline(entries) {
+      // POST each block to RescueTime. Its API sends no CORS headers, so the
+      // browser can DELIVER a form POST (no-cors) but can't READ the response.
+      // No status text is shown — the Added Activities list is all the feedback
+      // the user wants; we just assume the post went through.
+      if (!apiKey) return;
       try {
         for (const e of entries) {
           const body = new URLSearchParams({ key: apiKey, start_time: rtStamp(e.startMs),
@@ -3434,10 +3560,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           await fetch("https://www.rescuetime.com/anapi/offline_time_post",
             { method: "POST", mode: "no-cors", body });
         }
-        statusEl.textContent = `Added ${summary} — sent to RescueTime (verify there; the browser can't confirm cross-origin responses).`;
-      } catch {
-        statusEl.textContent = `Added ${summary} — saved locally, but the RescueTime request failed.`;
-      }
+      } catch { /* assume delivered; the list already reflects the add */ }
     }
 
     // ---- click / drag across calendar hours → select a range and fill the day
@@ -3570,12 +3693,23 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     setSwitch(null);         // the period switcher is for entity/period pages only
     const T = await trendData();
     document.getElementById("appDetailTitle").classList.remove("tc");
-    document.getElementById("appDetailTitle").textContent =
-      "Trends — Pulse Over Time";
+    document.getElementById("appDetailTitle").textContent = "Trends";   // set precisely by activate() below
     const fetchedAt = T.arch?.updated_at ?? data.generated_at;
     document.getElementById("appDetailFresh").textContent = fetchedAt
       ? `Data Up To ${new Date(fetchedAt).toLocaleString()}` : "No Data";
+    // Prior/Next window navigation: each view remembers its own offset (0 = the
+    // current window, negative = shifted back by whole spans). Yearly is all-time
+    // so it never navigates. earliest-data bounds disable Prior at the edge.
+    const offsets = { h: 0, w: 0, m: 0, y: 0 };
+    const archDayKeys = Object.keys(T.arch?.days ?? {});
+    const earliestDay = archDayKeys.length ? archDayKeys.reduce((a, b) => a < b ? a : b) : null;
+    const earliestMonth = earliestDay ? earliestDay.slice(0, 7) : null;
+    let earliestHourMs = Infinity;
+    for (const r of (data.hour_activities ?? [])) {
+      const t = new Date(r[0]).getTime(); if (t < earliestHourMs) earliestHourMs = t;
+    }
     document.getElementById("appDetailRows").innerHTML = `
+      <div class="trend-tabs-wrap">
       <div id="trendTabs">
         <div class="tab-row">
           <div class="tab-group">Daily</div>
@@ -3606,6 +3740,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           <div class="app-sec tab" data-tab="y-combined">Combined</div>
         </div>
       </div>
+      <div class="pswitch-nav trend-nav">
+        <button type="button" class="pswitch-btn" id="trendPrev">◀ Prior</button>
+        <button type="button" class="pswitch-btn" id="trendNext">Next ▶</button>
+      </div>
+      </div>
       <div class="trend-body" id="trendBody"></div>`;
     detailCard.hidden = false;
     sizeDetailCard();       // the charts need their final box BEFORE creation
@@ -3628,9 +3767,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         <div class="trend-sec"><div class="app-sec">${n} Apps</div>
           <div class="trend-chart"><canvas id="trendC3"></canvas></div></div>`;
       trendCharts = [
-        await buildTrendChart("trendC1", `${per}-pulse`, { legendScale: 1 }),
-        await buildTrendChart("trendC2", `${per}-cats`, { legendScale: 1 }),
-        await buildTrendChart("trendC3", `${per}-apps`, { legendScale: 1 }),
+        await buildTrendChart("trendC1", `${per}-pulse`, { legendScale: 1, offsets }),
+        await buildTrendChart("trendC2", `${per}-cats`, { legendScale: 1, offsets }),
+        await buildTrendChart("trendC3", `${per}-apps`, { legendScale: 1, offsets }),
       ];
     };
     const showTab = async key => {
@@ -3642,18 +3781,37 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           <div class="trend-chart tline"><canvas id="trendCanvas"></canvas></div>
           <div class="trend-chart tbar"><canvas id="trendBar"></canvas></div>
         </div>`;
+      const Tv = await trendData(offsets);
       trendCharts = [
-        await buildTrendChart("trendCanvas", key),
-        trendBarChart("trendBar", key[0], T),
+        await buildTrendChart("trendCanvas", key, { offsets }),
+        trendBarChart("trendBar", key[0], Tv),
       ];
     };
     // activate(key) marks the tab and shows its view — "<per>-combined"
     // keys render the stacked three-graph page
-    const activate = key => {
+    const VIEW_NAMES = { pulse: "Pulse", cats: "Category", apps: "Apps", combined: "Combined" };
+    const prevBtn = document.getElementById("trendPrev"),
+          nextBtn = document.getElementById("trendNext");
+    let curKey = initial ?? "m-combined";
+    const activate = async key => {
+      curKey = key;
       tabRow.querySelectorAll(".tab").forEach(x =>
         x.classList.toggle("active", x.dataset.tab === key));
-      if (key.endsWith("-combined")) showCombined(key[0]);
-      else showTab(key);
+      // dynamic headline: "Trends — <View> <Period>" (e.g. "Trends — Category Monthly")
+      const per = key.split("-")[0], view = key.split("-").slice(1).join("-");
+      document.getElementById("appDetailTitle").textContent =
+        `Trends — ${VIEW_NAMES[view] ?? "Pulse"} ${PER_NAMES[per] ?? ""}`.trim();
+      if (key.endsWith("-combined")) await showCombined(key[0]);
+      else await showTab(key);
+      // Prior/Next enable state for THIS view + its current offset
+      const Tc = await trendData(offsets), off = offsets[per] ?? 0;
+      let canPrior = false;
+      if (per === "m") canPrior = earliestMonth != null && earliestMonth < Tc.keys.m[0];
+      else if (per === "w") canPrior = earliestDay != null && earliestDay < Tc.keys.w[0];
+      else if (per === "h") canPrior = earliestHourMs < Tc.hOldestMs;
+      // yearly is all-time → never navigates
+      prevBtn.disabled = !canPrior;
+      nextBtn.disabled = per === "y" || off >= 0;
     };
     tabRow.addEventListener("click", e => {
       const t = e.target.closest(".tab");
@@ -3661,7 +3819,15 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       e.stopPropagation();   // a tab click must NOT close the card
       activate(t.dataset.tab);
     });
-    activate(initial ?? "m-combined");
+    const shift = dir => {
+      const per = curKey.split("-")[0];
+      if (per === "y") return;
+      offsets[per] = Math.min(0, (offsets[per] ?? 0) + dir);
+      activate(curKey);
+    };
+    prevBtn.addEventListener("click", e => { e.stopPropagation(); if (!prevBtn.disabled) shift(-1); });
+    nextBtn.addEventListener("click", e => { e.stopPropagation(); if (!nextBtn.disabled) shift(1); });
+    activate(curKey);
   }
 
   // ---- EVERY trend / %-vs-previous-period number on the page is a BUTTON

@@ -140,7 +140,7 @@ body {
 /* pulse card: History + OFF quick-links stacked in the top-left corner */
 #pulseCard { position: relative; }
 .card-icons {
-  position: absolute; top: 6px; left: 6px; z-index: 3;   /* top+left = card padding, so the icons line up with the card's content corner */
+  position: absolute; top: 16px; left: 16px; z-index: 3;   /* wider top+left margin so the icons sit further in from the card's corner */
   display: flex; flex-direction: column; gap: 0.65em;   /* a touch more so the two icons don't crowd after the top pull-up */
 }
 .card-icons .card-icon {
@@ -148,6 +148,9 @@ body {
   color: var(--text-dim); line-height: 0;   /* same grey as the card's text */
 }
 .card-icons .card-icon:hover { color: var(--text); }   /* brighten on hover */
+/* red "+" nudge: shown while the 7-day calendar still has empty hours to fill */
+.card-icons .card-icon.needs-fill { color: var(--vdist); }
+.card-icons .card-icon.needs-fill:hover { color: #d06b70; }   /* lighter red on hover */
 .card-icons .card-icon svg {
   width: 2.8rem; height: 2.8rem; display: block;
   /* the glyphs start at x≈4 AND y≈4 inside a 24-unit viewBox, leaving empty
@@ -356,23 +359,27 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
    the CURRENT rolling windows (Current 7 Days / Current 30 Days / Current
    Year), Total to all recorded data. Same recessed/active colours as the
    browser-style tabs; the ACTIVE pill marks the period currently shown. */
-/* three zones on one row: prev/next nav (left) | label (centred) | period
-   pills (right) */
+/* three zones on ONE row that NEVER wraps: prev/next nav (left) | label
+   (centred in the gap between them) | period pills (right). space-between +
+   nowrap keeps Day/Week/Month/Year/Total on a single line and drops the
+   "Change Periode" label exactly midway between Next's right edge and Day's
+   left edge. Tested at the ~810px-CSS iframe width (see memory). */
 .pswitch {
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
-  gap: 0.6em; margin-top: 0.55em;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5em; flex-wrap: nowrap; margin-top: 0.55em; margin-bottom: 1.1em;   /* roomier gap before the detail rows below (category + app pages) */
 }
-.pswitch-nav { justify-self: start; display: flex; gap: 0.4em; }
-.pswitch-pills { justify-self: end; display: flex; gap: 0.4em; flex-wrap: wrap; justify-content: flex-end; }
+.pswitch-nav   { display: flex; gap: 0.4em; flex: 0 0 auto; }
+.pswitch-pills { display: flex; gap: 0.35em; flex: 0 0 auto; flex-wrap: nowrap; }
 .pswitch-label {
-  justify-self: center; text-align: center;
+  flex: 0 1 auto; text-align: center; white-space: nowrap;
   font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
   text-transform: uppercase; color: var(--text-dim);
 }
 .pswitch-btn[disabled] { opacity: 0.35; cursor: default; }
 .pswitch-btn {
   cursor: pointer; font: inherit; font-size: 0.9rem; font-weight: 600;
-  padding: 0.45em 1em; border: 1px solid var(--panel-edge);   /* = tab size */
+  padding: 0.45em 0.8em; border: 1px solid var(--panel-edge);   /* = tab size; 0.8em keeps all 5 pills + nav + label on one row */
+  white-space: nowrap;
   border-radius: 999px; background: var(--panel-edge); color: var(--text-dim);  /* unselected = lighter grey */
 }
 .pswitch-btn:not(.active):hover { color: var(--text); }
@@ -427,7 +434,7 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 /* period card: the top-apps list sits under the same divider the app
    card uses before its months/years section; the bars share the site-wide
    mirrored style but at the detail card's larger type */
-.period-apps { margin-top: 1.3em; padding-top: 0.9em; border-top: 1px solid var(--panel-edge); }
+.period-apps { margin-top: 0.3em; padding-top: 0.3em; border-top: 1px solid var(--panel-edge); }
 /* the tabbed section absorbs the card's leftover height; the list SCROLLS
    inside it, with a small theme-matched scrollbar (scrollbars are hidden
    site-wide, so these rules deliberately re-enable a thin one here) */
@@ -450,7 +457,7 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
    bar view of the same period (1 part) — bar graph = 1/3 of the line graph */
 .trend-split { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; margin-top: 0.4em; }
 .trend-split .tline { flex: 3 1 0; min-height: 0; margin-top: 0; }
-.trend-split .tbar  { flex: 1 1 0; min-height: 0; margin-top: 0.4em; }
+.trend-split .tbar  { flex: 2 1 0; min-height: 0; margin-top: 0.4em; }   /* bar chart 20% shorter than an equal split (40% vs line's 60%) */
 
 /* ---- Offline Activities page: LEFT add-form | RIGHT day timeline ---- */
 /* fill the whole card height so each column can scroll independently */
@@ -526,12 +533,16 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .off-recent-empty { text-transform: none; letter-spacing: normal; font-style: italic; font-size: 0.85rem; }
 .off-rec-row { display: flex; flex-direction: column; padding: 0.16em 0.1em;   /* tight rows */
   border-bottom: 1px solid var(--panel-edge); }
-/* top row: name (left), time range + block count (centre), date (right) */
-.off-rec-top { display: flex; align-items: baseline; gap: 0.6em; }
-.off-rec-name { font-size: 0.95rem; font-weight: 600; color: var(--text); white-space: nowrap; }
-.off-rec-mid { flex: 1 1 auto; text-align: center; font-size: 0.8rem; color: var(--text-dim);
-  white-space: nowrap; font-variant-numeric: tabular-nums; }
-.off-rec-date { font-size: 0.8rem; color: var(--text-dim); white-space: nowrap; }
+/* top row (grid so the time range starts at the SAME x on EVERY line): the
+   name column is a FIXED 42% so the range always begins at that edge; name
+   (left, truncates) | time range + block count (left-aligned) | date (right) */
+.off-rec-top { display: grid; grid-template-columns: 42% auto 1fr; column-gap: 0.6em;
+  align-items: baseline; }
+.off-rec-name { font-size: 0.95rem; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.off-rec-mid { justify-self: start; text-align: left; font-size: 0.8rem;
+  color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.off-rec-date { justify-self: end; font-size: 0.8rem; color: var(--text-dim); white-space: nowrap; }
 /* the "details about your time" text: SAME size as the activity name, but
    keeps the dim colour */
 .off-rec-det { font-size: 0.95rem; color: var(--text-dim); font-style: italic; }
@@ -637,6 +648,11 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .tab-row {
   display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center;
 }
+/* Trends: the tab grid + a Prior/Next window-nav sitting to the RIGHT of the
+   Combined column (vertically centred against the four rows) */
+.trend-tabs-wrap { display: flex; align-items: center; gap: 1.5em; }
+.trend-tabs-wrap #trendTabs { flex: 0 0 auto; }
+.trend-nav { flex: 0 0 auto; }
 /* tabs are now PILL BUTTONS, identical in shape/size to the .pswitch-btn
    period pills (user spec) — plain case, not the old baseline tab look */
 .tab-row .tab {
@@ -705,28 +721,33 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   grid-template-areas: "a b trend prior"
                        "c d trend prior";
-  gap: 0 0.5em; align-items: center; padding: 0 0.3em;
+  gap: 0.02em 0.5em; align-items: center; padding: 0 0.3em;   /* very tight row gap: This Period / Of This Period / type row sit close together */
   container-type: inline-size;
 }
 .ent-grid .ent-a { grid-area: a; }
 .ent-grid .ent-b { grid-area: b; }
 .ent-grid .ent-c { grid-area: c; }
 .ent-grid .ent-d { grid-area: d; }
-/* app detail: an extra full-width row UNDER the share %s — the app's category
-   (renamed or raw) on the left + its type on the right, both in the type colour */
+/* app detail: a 3rd row UNDER the share %s — the app's TYPE in the LEFT column
+   (under This Period) + its category in the 2nd column (words swapped per user),
+   both coloured by the type and rendered at the SAME size as the big trend text */
 .ent-grid.ent-hascat {
   grid-template-areas: "a b trend prior"
                        "c d trend prior"
-                       "cat cat cat cat";
+                       "cat cattype . .";
 }
-.ent-grid .ent-cat {
-  grid-area: cat; display: flex; align-items: baseline; justify-content: space-between;
-  gap: 0.5em; min-width: 0; padding-top: 0.2em; font-size: 0.85rem; font-weight: 600;
+.ent-grid .ent-catcell  { grid-area: cat; }
+.ent-grid .ent-typecell { grid-area: cattype; }
+/* the type/category row prints as large as the trend (same clamp) — a bold,
+   prominent line rather than a small label */
+.ent-grid.ent-hascat .ent-catcell .cat-name,
+.ent-grid.ent-hascat .ent-typecell .cat-name {
+  font-size: clamp(0.85rem, 8cqw, 1.7rem); font-weight: 600; line-height: 1.1;
 }
-.ent-grid .ent-cat .ent-catname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ent-grid .ent-cat .ent-cattype { white-space: nowrap; }
+.ent-grid.ent-hascat .ent-catcell,
+.ent-grid.ent-hascat .ent-typecell { height: auto; align-self: center; }
 .ent-grid .cat-label {
-  position: static; pointer-events: auto; height: 2rem; min-width: 0;
+  position: static; pointer-events: auto; height: 1.35rem; min-width: 0;   /* tight rows — value lines sit close together */
 }
 .ent-grid .cat-time { font-weight: 600; }
 .ent-grid .ent-share { color: var(--text-dim); }

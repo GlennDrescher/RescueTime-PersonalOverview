@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=82">
+<link rel="stylesheet" href="styles.css?v=83">
 
 </head>
 <body>
@@ -2551,8 +2551,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
 
   // ---- shared trend-chart machinery: the Trends card, the period cards'
   //      Weekly tabs and the 14-days card's click-cycle all build their
-  //      graphs from here. Periods: w = past 51 weeks, m = past 12 calendar
-  //      months, y = every year from the first logged one to now — the axes
+  //      graphs from here. Periods: w = past 4 weeks in 48-hour (2-day)
+  //      steps (14 buckets), m = past 12 calendar months, y = every year
+  //      from the first logged one to now — the axes
   //      are FIXED; periods below the 0.5 h floor become gaps in the lines.
   //      Pulse charts: Pulse (real 0-100) + Productive/Neutral/Distracting
   //      as % of the period's logged time. Category charts: top 10 all-time
@@ -2564,21 +2565,31 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
     }
-    for (let i = 50; i >= 0; i--) {
-      const d = weekStart(now); d.setDate(d.getDate() - 7 * i);
-      weekKeys.push(isoOf(d.getTime()));
+    // The "Weekly" trends view is a rolling 4-week window drawn in 48-hour
+    // steps: 14 buckets, each combining 2 calendar days (newest bucket =
+    // yesterday + today, oldest = 27/26 days ago). wKeyOf maps every one of
+    // those 28 days to its bucket's start ISO; days outside the window get
+    // no "w" key and are skipped below.
+    const wKeyOf = new Map();
+    for (let j = 13; j >= 0; j--) {          // oldest bucket first, like the old week keys
+      const older = daysAgo(2 * j + 1), newer = daysAgo(2 * j);
+      const startIso = isoOf(older.getTime());
+      weekKeys.push(startIso);
+      wKeyOf.set(startIso, startIso);
+      wKeyOf.set(isoOf(newer.getTime()), startIso);
     }
     const lv = { w: new Map(), m: new Map(), y: new Map() };
     const cat = { w: new Map(), m: new Map(), y: new Map() };
     const app = { w: new Map(), m: new Map(), y: new Map() };
     const catTot = new Map(), appTot = new Map();
     const keysOf = day => ({
-      w: isoOf(weekStart(new Date(day + "T00:00:00")).getTime()),
+      w: wKeyOf.get(day),          // undefined when the day is outside the 4-week window
       m: day.slice(0, 7), y: day.slice(0, 4) });
     const addLv = (day, l, sec) => {
       if (!LEVELS.includes(String(l))) return;
       const ks = keysOf(day);
       for (const p of ["w", "m", "y"]) {
+        if (ks[p] == null) continue;   // day not in this period's window
         const m = lv[p].get(ks[p]) ?? lv[p].set(ks[p], emptyLevels()).get(ks[p]);
         m[String(l)] += sec;
       }
@@ -2587,6 +2598,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const name = catName(c);
       const ks = keysOf(day);
       for (const p of ["w", "m", "y"]) {
+        if (ks[p] == null) continue;
         const m = cat[p].get(ks[p]) ?? cat[p].set(ks[p], new Map()).get(ks[p]);
         m.set(name, (m.get(name) ?? 0) + sec);
       }
@@ -2596,6 +2608,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const name = appName(a);
       const ks = keysOf(day);
       for (const p of ["w", "m", "y"]) {
+        if (ks[p] == null) continue;
         const m = app[p].get(ks[p]) ?? app[p].set(ks[p], new Map()).get(ks[p]);
         m.set(name, (m.get(name) ?? 0) + sec);
       }
@@ -2740,11 +2753,16 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
             ? `${short} ${String(d.getFullYear()).slice(2)}` : short,
           tip: `${cap(d.toLocaleDateString(undefined, { month: "long" }))} ${d.getFullYear()}` };
       }
+      // "w" is a 2-day (48 h) bucket now: label the day range, e.g. "1–2 Jul"
       const d = new Date(k + "T00:00:00");
-      const wn = isoWeekNum(d);
-      const th = new Date(d); th.setDate(d.getDate() + 3);   // the ISO year lives on Thursday
-      return { lbl: `W${wn}`,   // no year suffix — the year lives in the tooltip
-               tip: `Week ${wn} ${th.getFullYear()} (From ${k})` };
+      const end = new Date(d); end.setDate(d.getDate() + 1);   // second day of the bucket
+      const moS = cap(d.toLocaleDateString(undefined, { month: "short" }));
+      const endMoS = cap(end.toLocaleDateString(undefined, { month: "short" }));
+      const lbl = d.getMonth() === end.getMonth()
+        ? `${d.getDate()}–${end.getDate()} ${moS}`
+        : `${d.getDate()} ${moS}–${end.getDate()} ${endMoS}`;
+      return { lbl,
+               tip: `${moS} ${d.getDate()} – ${endMoS} ${end.getDate()} ${end.getFullYear()} (48 h)` };
     };
     const labels = [], tips = [];
     keys.forEach((k, i) => {
@@ -2755,7 +2773,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       keys, labels, tips, lvMap: T.lv[per],
       catMap: what === "apps" ? T.app[per] : T.cat[per],
       topCats: what === "apps" ? T.topApps : T.topCats,
-      what, pointR: per === "w" ? 2 : 3, ...opts });
+      what, pointR: 3, ...opts });
   }
 
   // ---- the TRENDS detail card: grouped tabs (Weekly / Monthly / Yearly,

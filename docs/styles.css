@@ -6,7 +6,7 @@
 :root {
   --bg: #1e1e1e; --panel: #2a2a2a; --panel-edge: #383838; --track: #191919;
   --text: #e3e3e3; --text-dim: #909090; --pulse: #3a86d4;
-  --vprod: #2563ae; --prod: #5b9bd5; --neut: #8c96a3; --dist: #e8913a; --vdist: #d64541;
+  --vprod: #2563ae; --prod: #5b9bd5; --neut: #8c96a3; --dist: #985bd5; --vdist: #b34d53;
 }
 * { box-sizing: border-box; margin: 0; }
 /* .card sets display:flex, which would silently override the UA stylesheet's
@@ -65,7 +65,7 @@ body {
    maybe more numbers later) + the three period columns, so rows line up. */
 /* v82: the first column only holds the short "Prod"/"Dist" bar labels — the
    hours-to-50 stats moved next to their rings, so it is very narrow now */
-.donuts { display: grid; grid-template-columns: 2.8em repeat(3, minmax(0, 1fr)); gap: clamp(4px, 1vw, 14px); }
+.donuts { display: grid; grid-template-columns: 2.8em repeat(3, minmax(0, 1fr)); gap: clamp(10px, 2.6vw, 30px); }  /* wider gap = the three period columns are more separated */
 .donuts + .donuts { margin-top: 0.6em; }  /* gap between pulse rings and the bars */
 .label-col { min-width: 0; }
 /* one label per bar row, sized/spaced exactly like the .delta-row/.total-row
@@ -93,22 +93,27 @@ body {
   text-transform: uppercase; color: var(--text-dim); margin: 0; line-height: 1.1;
   white-space: nowrap;
 }
+/* pull the logged-hours label (above the number) closer to the big number */
+.pulse-inner .pulse-label:first-child { margin-bottom: -0.18em; }
 
 /* ---- hours-to-50 stats (v82): ONE per pulse ring, sitting directly to the
    LEFT of its circle — the Distracting hours that window can still absorb
    before its pulse drops to 50 (flips to the Productive hours needed when
    the pulse is below 50). Value on top, "Dist/Prod Needed" hanging below. ----*/
-/* stat + ring ride in one centered flex row per period column */
-/* three-track grid so the ring stays CENTRED in the column while the
-   hours-to-50 stat sits at the LEFT edge of the cell (left | ring | spacer) */
+/* stat + ring ride in one row per period column. TWO tracks: a flexible left
+   region for the hours-to-50 stat + the ring RIGHT-ALIGNED in the column, so
+   the pulse circle hugs the right edge (user request). */
+/* THREE tracks: a left stat column the SAME width as the ring, a flexible
+   spacer that grows with the column (the requested extra separation), and the
+   ring RIGHT-aligned. Because the stat column and the ring are the same width
+   and their contents are centred, the pulse number ends up exactly as far from
+   the column's RIGHT edge as the hours-needed number is from its LEFT edge. */
 .ring-row {
-  display: grid; grid-template-columns: 1fr min(92px, 56cqw) 1fr;
+  display: grid;
+  grid-template-columns: minmax(0, min(92px, 56cqw)) minmax(0, 1fr) min(92px, 56cqw);
   align-items: center; gap: clamp(4px, 0.7vw, 12px);
 }
-.ring-row .pulse-wrap { margin: 0; grid-column: 2; width: 100%; }
-/* stat sits CENTRED in its cell (col 1); the value's own box is vertically
-   centred in the ring-row so the big number lines up with the ring's pulse
-   number (both at the row's vertical middle) */
+.ring-row .pulse-wrap { margin: 0; grid-column: 3; width: 100%; }
 .ring-stat { min-width: 0; grid-column: 1; position: relative; display: flex;
   align-items: center; justify-content: center; text-align: center; }
 .ring-stat .stat-inner { position: static; }
@@ -135,15 +140,23 @@ body {
 /* pulse card: History + OFF quick-links stacked in the top-left corner */
 #pulseCard { position: relative; }
 .card-icons {
-  position: absolute; top: 0.5em; left: 0.6em; z-index: 3;
-  display: flex; flex-direction: column; gap: 0.5em;
+  position: absolute; top: 6px; left: 6px; z-index: 3;   /* top+left = card padding, so the icons line up with the card's content corner */
+  display: flex; flex-direction: column; gap: 0.65em;   /* a touch more so the two icons don't crowd after the top pull-up */
 }
 .card-icons .card-icon {
-  background: none; border: 0; padding: 0.15em; cursor: pointer;
+  background: none; border: 0; padding: 0.15em; padding-left: 0; padding-top: 0; cursor: pointer;
   color: var(--text-dim); line-height: 0;   /* same grey as the card's text */
 }
 .card-icons .card-icon:hover { color: var(--text); }   /* brighten on hover */
-.card-icons .card-icon svg { width: 2.8rem; height: 2.8rem; display: block; }
+.card-icons .card-icon svg {
+  width: 2.8rem; height: 2.8rem; display: block;
+  /* the glyphs start at x≈4 AND y≈4 inside a 24-unit viewBox, leaving empty
+     space on the left and top; pull the svg up+left by that inset so the
+     VISIBLE strokes sit the same small distance from the card's top and left
+     edges instead of looking indented */
+  margin-left: calc(2.8rem * -4 / 24);
+  margin-top: calc(2.8rem * -4 / 24);
+}
 
 /* card title row with a right-anchored stat (the 14-day card's daily average) */
 .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6em; }
@@ -249,6 +262,9 @@ body {
   white-space: pre; opacity: 0; transition: opacity 0.1s;
 }
 #chartjs-tooltip .tt-title { font-weight: 600; }
+/* two-side tooltip line: left text + right-aligned label (e.g. app + its type) */
+#chartjs-tooltip .tt-row { display: flex; justify-content: space-between; gap: 1.4em; }
+#chartjs-tooltip .tt-row .tt-right { color: var(--text-dim); }
 
 /* ---- never show scrollbars (the pages live in small iframes/widgets);
        scrolling itself still works with the wheel or touch ---- */
@@ -492,7 +508,7 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .off-hint { font-size: 0.8rem; color: var(--text-dim); font-style: italic; margin-top: -0.5em; }
 .off-status { font-size: 0.85rem; color: var(--text-dim); min-height: 1.2em; text-align: center; }
 .off-status:empty { min-height: 0; }   /* collapse when there's no message */
-.off-recent-head-top { margin-top: -0.9em; }   /* tight gap above Added Activities */
+.off-recent-head-top { margin-top: -0.9em; margin-bottom: 0.15em; }   /* tight gap above + below Added Activities */
 /* optional RescueTime API key (stored only in this browser, never in the repo) */
 .off-sync { display: flex; gap: 0.4em; align-self: stretch; align-items: center; }
 .off-key { flex: 1 1 auto; min-width: 0; background: var(--track); border: 1px solid var(--panel-edge);
@@ -501,18 +517,24 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .off-key::placeholder { color: var(--text-dim); }
 .off-keybtn { flex: 0 0 auto; }
 /* recent activities list — grows to fill the left column downward, scrolls */
-.off-recent { flex: 1 1 auto; min-height: 4em; overflow-y: auto; margin-top: 0.4em;
+.off-recent { flex: 1 1 auto; min-height: 4em; overflow-y: auto; margin-top: 0.1em;
   scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent; }
 .off-recent::-webkit-scrollbar { width: 6px; display: block; }
 .off-recent::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
 .off-recent-head, .off-recent-empty { font-size: 0.7rem; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.5em; text-align: center; }
 .off-recent-empty { text-transform: none; letter-spacing: normal; font-style: italic; font-size: 0.85rem; }
-.off-rec-row { display: flex; flex-direction: column; padding: 0.4em 0.1em;
+.off-rec-row { display: flex; flex-direction: column; padding: 0.16em 0.1em;   /* tight rows */
   border-bottom: 1px solid var(--panel-edge); }
-.off-rec-name { font-size: 0.95rem; font-weight: 600; color: var(--text); }
-.off-rec-meta { font-size: 0.78rem; color: var(--text-dim); }
-.off-rec-det { font-size: 0.8rem; color: var(--text-dim); font-style: italic; }
+/* top row: name (left), time range + block count (centre), date (right) */
+.off-rec-top { display: flex; align-items: baseline; gap: 0.6em; }
+.off-rec-name { font-size: 0.95rem; font-weight: 600; color: var(--text); white-space: nowrap; }
+.off-rec-mid { flex: 1 1 auto; text-align: center; font-size: 0.8rem; color: var(--text-dim);
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
+.off-rec-date { font-size: 0.8rem; color: var(--text-dim); white-space: nowrap; }
+/* the "details about your time" text: SAME size as the activity name, but
+   keeps the dim colour */
+.off-rec-det { font-size: 0.95rem; color: var(--text-dim); font-style: italic; }
 /* day timeline (right) — fills height + scrolls; newest hour on top */
 .offline-day { position: relative; min-width: 0; overflow-y: auto; min-height: 0;
   scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent; }
@@ -690,6 +712,19 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .ent-grid .ent-b { grid-area: b; }
 .ent-grid .ent-c { grid-area: c; }
 .ent-grid .ent-d { grid-area: d; }
+/* app detail: an extra full-width row UNDER the share %s — the app's category
+   (renamed or raw) on the left + its type on the right, both in the type colour */
+.ent-grid.ent-hascat {
+  grid-template-areas: "a b trend prior"
+                       "c d trend prior"
+                       "cat cat cat cat";
+}
+.ent-grid .ent-cat {
+  grid-area: cat; display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0.5em; min-width: 0; padding-top: 0.2em; font-size: 0.85rem; font-weight: 600;
+}
+.ent-grid .ent-cat .ent-catname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ent-grid .ent-cat .ent-cattype { white-space: nowrap; }
 .ent-grid .cat-label {
   position: static; pointer-events: auto; height: 2rem; min-width: 0;
 }

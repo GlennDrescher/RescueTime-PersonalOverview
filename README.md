@@ -80,16 +80,22 @@ Your dashboard is then live at `https://<your-username>.github.io/<repo-name>/`.
 
 The dashboard is a normal website you can open and use directly — but it also embeds cleanly. Point any iframe/embed widget at your Pages URL; on start.me, add an **Embed** widget with the URL above. `index.html` shows the full panel plus a footer countdown to the next data refresh; you can also embed `All-Data.html` directly if you don't want the footer.
 
-## Customize display names
+## Customize display names & types
 
-Edit `docs/dictionary.json` to rename raw RescueTime activity names (`"youtube.com": "YouTube"`) or merge several raw names into one app, and to rename categories. Detail cards list the original raw names that were combined, so nothing gets hidden.
+Edit `docs/dictionary.json`. Two sections, both this-site-only (RescueTime itself is never changed):
+
+- `Apps` — e.g. `{ "OriginalName": ["ffx", "ffx-2"], "NewName": "Final Fantasy 10", "NewCategory": "Games" }`. Combine several raw activity names under one `NewName`; `NewCategory` (optional) assigns those apps a category. Omit `NewCategory` to keep RescueTime's category.
+- `Categories` — e.g. `{ "OriginalName": ["Games", "General Entertainment"], "NewName": "Fun", "NewType": "Personal" }`. Combine/rename categories and, optionally, re-type them (`NewType` = Work | Productive | Neutral | Personal | Distracting). Omit `NewType` to keep RescueTime's type.
+
+Matching is case-insensitive on the raw RescueTime names. Type/category changes take effect on the next data fetch. Detail cards list the original raw names that were combined, so nothing gets hidden.
 
 ## Run it locally (optional)
 
-On Windows, create a `Secrets.ini` next to the scripts containing `key=YOUR_API_KEY`, then:
+On Windows, create a `Secrets.ini` in the repo root containing `key=YOUR_API_KEY`, then use the scripts in `scripts/`:
 
-- `Fetch-Data.ps1` — runs the same fetch script the Action uses and updates `docs/` locally.
-- `Serve-Website.ps1` — serves the site on localhost for previewing changes.
+- `scripts\Fetch-Data.ps1` — runs the same fetch script the Action uses and updates `docs/` locally.
+- `scripts\"Serve Temporary Website.ps1"` — serves the site on localhost while the window stays open (for previewing changes).
+- `scripts\"Install and Start persistent Local Website.ps1"` — sets up a background server (restarts on login) plus a 30-minute auto-fetch, so the local site stays live and current on its own; `scripts\"Stop Local persistent Website.ps1"` undoes it.
 
 `Secrets.ini`, `docs/data.json` and `docs/archive.json` are gitignored, so local runs never push personal data.
 

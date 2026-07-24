@@ -52,6 +52,71 @@ BACKFILL_CAP = 240   # never walk more than 20 years back
 EMPTY_MONTHS_STOP = 2  # stop backfill after this many consecutive empty months
 
 
+# ------------------------------------------------- dictionary type overrides
+# docs/dictionary.json can re-type activities for THIS site only (RescueTime is
+# not touched). Two optional sections drive the SEMANTIC part (display renames
+# are applied client-side):
+#   "Apps":       [ { "OriginalName": ["ffx","ffx-2"], "NewName": "Final Fantasy 10",
+#                     "NewCategory": "Games" } ]   -> assigns a category to apps
+#   "Categories": [ { "OriginalName": ["Games","General Entertainment"],
+#                     "NewName": "Fun", "NewType": "Personal" } ]  -> re-types a
+#                     category (NewType/NewCategory optional)
+# The archive stays RAW (real RescueTime data); the override is applied every
+# run while data.json is rebuilt, so editing the dictionary takes effect on the
+# next fetch. NewType -> productivity value:
+TYPE_PROD = {"work": 2, "productive": 1, "neutral": 0, "personal": -1, "distracting": -2}
+APP_CAT = {}    # lowercased raw app name  -> category to assign
+CAT_TYPE = {}   # lowercased raw category  -> productivity value to force
+APP_TYPE = {}   # lowercased raw app name  -> productivity value to force (wins over category)
+
+
+def _orig_names(g):
+    o = g.get("OriginalName")
+    return o if isinstance(o, list) else ([o] if o else [])
+
+
+def _prod_of(g):
+    """A productivity override written as EITHER `type` OR `NewType`."""
+    t = g.get("type", g.get("NewType"))
+    return TYPE_PROD.get(str(t).strip().lower()) if t is not None else None
+
+
+def load_overrides():
+    """Read the override maps from docs/dictionary.json (best-effort)."""
+    app_cat, cat_type, app_type = {}, {}, {}
+    try:
+        d = json.loads((DOCS / "dictionary.json").read_text(encoding="utf-8"))
+    except Exception:
+        return app_cat, cat_type, app_type
+    for g in d.get("Apps", []) or []:
+        cat, prod = g.get("NewCategory"), _prod_of(g)
+        for n in _orig_names(g):
+            k = str(n).lower()
+            if cat:              app_cat[k] = cat
+            if prod is not None: app_type[k] = prod
+    for g in d.get("Categories", []) or []:
+        prod = _prod_of(g)
+        if prod is not None:
+            for n in _orig_names(g):
+                cat_type[str(n).lower()] = prod
+            # also key by NewName so an app's NewCategory can point at a renamed
+            # category (e.g. NewCategory:"Fun") and still inherit its type
+            if g.get("NewName"):
+                cat_type[str(g["NewName"]).lower()] = prod
+    return app_cat, cat_type, app_type
+
+
+def translate(act, cat, prod):
+    """app->category, then type (app's own type wins over its category's).
+    Returns (cat, prod)."""
+    a = str(act).lower() if act is not None else None
+    cat2 = APP_CAT.get(a, cat) if a is not None else cat
+    prod2 = APP_TYPE.get(a) if a is not None else None
+    if prod2 is None:
+        prod2 = CAT_TYPE.get(str(cat2).lower(), prod) if cat2 is not None else prod
+    return cat2, prod2
+
+
 # ---------------------------------------------------------------- api helpers
 def api_key() -> str:
     key = os.environ.get("RT_KEY", "").strip()
@@ -214,15 +279,22 @@ def day_level_totals(archive: dict, day: str) -> dict:
     if rows is not None:
         lv = {}
         for sec, _act, _cat, prod in rows:
-            lv[str(prod)] = lv.get(str(prod), 0) + sec
+            _c, p = translate(_act, _cat, prod)   # apply dictionary re-typing
+            lv[str(p)] = lv.get(str(p), 0) + sec
         return lv
+    # day_levels (pre-premium days with no per-activity detail) carry no
+    # category, so a category->type override can't reach them; they stay raw
     return archive["day_levels"].get(day, {})
 
 
 def rank_shape(compact) -> list:
-    """[sec, act, cat, prod] -> the UI's rank row shape [i, sec, 1, act, cat, prod]."""
-    return [[i + 1, sec, 1, act, cat, prod]
-            for i, (sec, act, cat, prod) in enumerate(compact)]
+    """[sec, act, cat, prod] -> the UI's rank row shape [i, sec, 1, act, cat, prod],
+    applying the dictionary's app->category / category->type overrides."""
+    out = []
+    for i, (sec, act, cat, prod) in enumerate(compact):
+        cat2, prod2 = translate(act, cat, prod)
+        out.append([i + 1, sec, 1, act, cat2, prod2])
+    return out
 
 
 def merge_days(archive: dict, days: list) -> list:
@@ -260,7 +332,10 @@ def build_data(archive: dict, hour_rows: list, today: date) -> dict:
         "month_activities": merge_days(archive, span(30)),
         "day_activities": {d: rank_shape(archive["days"].get(d, []))
                            for d in span(30) if d in archive["days"]},
-        "hour_activities": hour_rows,
+        # hour rows are rank-shaped [hour, sec, people, act, cat, prod]; re-type
+        # them too so the rolling-24h pulse matches the rest of the site
+        "hour_activities": [([r[0], r[1], r[2], r[3], *translate(r[3], r[4], r[5])]
+                             if len(r) >= 6 else r) for r in hour_rows],
         "history_start": archive.get("history_start"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -306,6 +381,10 @@ def main():
     recompute_bounds(archive)
     ARCHIVE_PATH.write_text(json.dumps(archive, separators=(",", ":")),
                             encoding="utf-8")
+    # load the dictionary overrides now (archive was written RAW just above;
+    # only data.json gets the re-typing applied)
+    global APP_CAT, CAT_TYPE, APP_TYPE
+    APP_CAT, CAT_TYPE, APP_TYPE = load_overrides()
     DATA_PATH.write_text(json.dumps(build_data(archive, hour_rows, today),
                                     separators=(",", ":")), encoding="utf-8")
     n_days = len(archive["days"]) + len(archive["day_levels"])

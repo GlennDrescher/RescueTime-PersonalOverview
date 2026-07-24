@@ -1,12 +1,12 @@
 # ============================================================
-# Serve-Website.ps1 - run the dashboard locally
+# Serve Temporary Website.ps1 - run the dashboard locally
 #
 # The pages load data.json / dictionary.json with fetch(), which browsers block
 # on file:// URLs - the site has to be served over HTTP to work. This script
 # serves the docs folder with Python's built-in web server and opens the
 # site in your default browser.
 #
-#   Run:   .\Serve-Website.ps1        (from the repo root)
+#   Run:   .\scripts\"Serve Temporary Website.ps1"     (from the repo root)
 #   Stop:  Ctrl+C in this window
 # ============================================================
 
@@ -21,5 +21,6 @@ if (-not $python) {
 
 Write-Host "Serving docs on http://localhost:$port  (Ctrl+C to stop)" -ForegroundColor Green
 Start-Process "http://localhost:$port/index.html"
-Set-Location (Join-Path $PSScriptRoot "docs")
+# docs is one level up from this script's new home in scripts\
+Set-Location (Join-Path (Split-Path $PSScriptRoot) "docs")
 & $python.Source -m http.server $port

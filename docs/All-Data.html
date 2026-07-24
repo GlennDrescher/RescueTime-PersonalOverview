@@ -5,9 +5,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=102">
-<link rel="icon" href="favicon.svg?v=102" type="image/svg+xml">
-<link rel="icon" href="favicon.ico?v=102" sizes="32x32">
+<link rel="stylesheet" href="styles.css?v=111">
+<link rel="icon" href="favicon.svg?v=111" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=111" sizes="32x32">
 
 </head>
 <body>
@@ -52,8 +52,7 @@
   <!-- 1. Pulse: past-24h / week / month donuts (label inside the hole) + trend delta bars.
        Clicking opens RescueTime: left third = today, middle = week, right = month. -->
   <div class="card" id="pulseCard" style="grid-column: 1 / -1">
-    <!-- top-left quick-links: + -> Manual (offline) Activities, History ->
-         Highlights, page -> Reports -->
+    <!-- top-left quick-links: + -> Manual (offline) Activities, page -> Highlights -->
     <div class="card-icons">
       <button type="button" class="card-icon" id="iconOffline" title="Manual Activities" aria-label="Manual Activities">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
@@ -63,14 +62,6 @@
         </svg>
       </button>
       <button type="button" class="card-icon" id="iconHistory" title="Highlights" aria-label="Highlights">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-             stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 3v5h5"></path>
-          <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path>
-          <path d="M12 7v5l3 2"></path>
-        </svg>
-      </button>
-      <button type="button" class="card-icon" id="iconReports" title="Reports" aria-label="Reports">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -171,14 +162,14 @@
   <div class="card">
     <div class="card-head">
       <h2>Top Categories - 7 Days</h2>
-      <div class="card-stat cat-mix" id="mixWeekCats"></div>
+      <div class="card-stat" id="mixWeekCats"></div>
     </div>
     <div class="bar-list" id="catListWeek"></div>
   </div>
   <div class="card">
     <div class="card-head">
       <h2>Top Types - 7 Days</h2>
-      <div class="card-stat cat-mix" id="mixTypes7"></div>
+      <div class="card-stat" id="mixTypes7"></div>
     </div>
     <div class="bar-list" id="typeList7"></div>
   </div>
@@ -228,10 +219,10 @@
 <script>
 // ---- shared core: constants, helpers, data loading, demo data ----
 const LEVELS = ["2", "1", "0", "-1", "-2"];
-const COLORS = { "2": "#2563ae", "1": "#5b9bd5", "0": "#8c96a3", "-1": "#e8913a", "-2": "#d64541" };
-const NAMES  = { "2": "Very Productive", "1": "Productive", "0": "Neutral", "-1": "Distracting", "-2": "Very Distracting" };
+const COLORS = { "2": "#2563ae", "1": "#5b9bd5", "0": "#8c96a3", "-1": "#985bd5", "-2": "#b34d53" };
+const NAMES  = { "2": "Work", "1": "Productive", "0": "Neutral", "-1": "Personal", "-2": "Distracting" };
 const WEIGHT = { "2": 1, "1": 0.75, "0": 0.5, "-1": 0.25, "-2": 0 };
-const BLUE = "#5b9bd5", RED = "#d64541";
+const BLUE = "#5b9bd5", RED = "#b34d53";
 const NO_ANIM = { animation: false, animations: false,
                   transitions: { resize: { animation: { duration: 0 } } } };
 const hrs = sec => +(sec / 3600).toFixed(1);
@@ -383,7 +374,23 @@ document.addEventListener("mousemove", e => {
   el.appendChild(t);
   if (row.dataset.tipBody) {
     const b = document.createElement("div");
-    b.textContent = row.dataset.tipBody;
+    // each line is plain text UNLESS it contains a tab, in which case it splits
+    // into a left part and a right-aligned part (e.g. "1.0h App \t Work")
+    for (const line of row.dataset.tipBody.split("\n")) {
+      const tab = line.indexOf("\t");
+      if (tab >= 0) {
+        const rowEl = document.createElement("div");
+        rowEl.className = "tt-row";
+        const L = document.createElement("span"); L.textContent = line.slice(0, tab);
+        const R = document.createElement("span"); R.className = "tt-right"; R.textContent = line.slice(tab + 1);
+        rowEl.append(L, R);
+        b.appendChild(rowEl);
+      } else {
+        const d = document.createElement("div");
+        d.textContent = line;
+        b.appendChild(d);
+      }
+    }
     el.appendChild(b);
   }
   el.style.opacity = "1";
@@ -465,12 +472,77 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   if (!data) data = { rows_daily: [], week_activities: [], month_activities: [],
                     day_activities: {}, hour_activities: [], generated_at: null };  // NO demo data: show zeros / "No Data"
   // Lowercased keys -> case-insensitive lookup (matches Weeks-Months.html)
-  const appMap = Object.fromEntries(Object.entries(renames.apps ?? renames)
-    .map(([k, v]) => [k.toLowerCase(), v]));
+  // ---- dictionary: display renames + type/category overrides ----
+  // Schema: "Apps" [ {OriginalName:[raw...], NewName, NewCategory?} ] and
+  // "Categories" [ {OriginalName:[raw...], NewName?, NewType?} ]. OriginalName
+  // matches the raw RescueTime names (case-insensitive). data.json is already
+  // translated by the fetcher; we apply the SAME rules to the raw archive.json
+  // here so the long-range Trends stay consistent with the front page.
+  const TYPE_PROD = { work: 2, productive: 1, neutral: 0, personal: -1, distracting: -2 };
+  const appMap = {}, catMap = {};    // lowercased raw name -> display (New) name
+  const appCat = {}, catType = {}, appType = {};   // raw name -> assigned category / category-type / app-type
+  // display-name(lowercased) -> original raw names merged into it, so the
+  // ORIGINAL category names stay searchable and redirect to the merged detail
+  // page. Apps do NOT alias (an app only ever shows/searches as its NewName).
+  const catAliases = {};
+  const origNames = g => Array.isArray(g?.OriginalName) ? g.OriginalName
+                       : g?.OriginalName != null ? [g.OriginalName] : [];
+  // a productivity override may be written as EITHER `type` OR `NewType`
+  const prodOf = g => { const t = g?.type ?? g?.NewType;
+    return t != null ? TYPE_PROD[String(t).trim().toLowerCase()] : undefined; };
+  for (const g of renames.Apps ?? []) {
+    if (!g) continue;
+    const p = prodOf(g);
+    for (const n of origNames(g)) {
+      const k = String(n).toLowerCase();
+      if (g.NewName)       appMap[k] = g.NewName;
+      if (g.NewCategory)   appCat[k] = g.NewCategory;
+      if (p !== undefined) appType[k] = p;   // re-type this app directly (wins over its category)
+    }
+  }
+  for (const g of renames.Categories ?? []) {
+    if (!g) continue;
+    const p = prodOf(g);
+    // also key the type by the NewName, so an app whose NewCategory points at a
+    // RENAMED category (e.g. NewCategory:"Fun") still inherits that type
+    if (g.NewName && p !== undefined) catType[g.NewName.toLowerCase()] = p;
+    for (const n of origNames(g)) {
+      const k = String(n).toLowerCase();
+      if (g.NewName)       catMap[k] = g.NewName;
+      if (p !== undefined) catType[k] = p;
+      if (g.NewName && k !== g.NewName.toLowerCase())
+        (catAliases[g.NewName.toLowerCase()] ??= []).push(String(n));
+    }
+  }
   const appName = raw => appMap[String(raw).toLowerCase()] ?? raw;
-  const catMap = Object.fromEntries(Object.entries(renames.categories ?? {})
-    .map(([k, v]) => [k.toLowerCase(), v]));
   const catName = raw => catMap[String(raw).toLowerCase()] ?? raw;
+  const hasOverrides = Object.keys(appCat).length > 0 || Object.keys(catType).length > 0
+                    || Object.keys(appType).length > 0;
+  // translate ONE raw archive row [sec, act, cat, prod] -> re-typed copy.
+  // Precedence: an app's own type override > its (effective) category's type > raw.
+  const translateRow = ([sec, act, cat, prod]) => {
+    const c = appCat[String(act).toLowerCase()] ?? cat;
+    const p = appType[String(act).toLowerCase()] ?? catType[String(c).toLowerCase()] ?? prod;
+    return [sec, act, c, p];
+  };
+  // same, for data.json's RANK-shaped rows [rank, sec, people, act, cat, prod]
+  const translateRank = r => {
+    if (!Array.isArray(r) || r.length < 6) return r;
+    const c = appCat[String(r[3]).toLowerCase()] ?? r[4];
+    const p = appType[String(r[3]).toLowerCase()] ?? catType[String(c).toLowerCase()] ?? r[5];
+    return [r[0], r[1], r[2], r[3], c, p];
+  };
+  // data.json's per-app arrays are already translated by the fetcher, but apply
+  // the SAME rules here too (idempotent) so overrides show even BEFORE the next
+  // fetch and so app/type COLOURS that read data.json match the archive. NOTE:
+  // rows_daily carries no category, so the aggregate week/month pulse number
+  // still only picks up a category->type change on the next fetch.
+  if (hasOverrides) {
+    for (const key of ["month_activities", "week_activities", "hour_activities"])
+      if (Array.isArray(data[key])) data[key] = data[key].map(translateRank);
+    for (const d in (data.day_activities ?? {}))
+      data.day_activities[d] = data.day_activities[d].map(translateRank);
+  }
   // anything with less TOTAL logged time than this never appears in the
   // suggestions or the Top lists — the site-wide 0.5 h floor
   const MIN_LOGGED_SEC = 1800;
@@ -540,7 +612,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     for (const [, sec, , , , prod] of rows) r[String(prod)] += sec; return r; };
   const lv24 = levelsOf(acts24);
   const prev24Lv = orNull(levelsOf(actsPrev24));
-  document.getElementById("labelToday").textContent = "24 Hours";
+  document.getElementById("labelToday").textContent = "Today";
   document.getElementById("card24hTitle").textContent = "Top Apps - 24 Hours";
   // total logged hours of the window, anchored right on the card title row
   const tot24Sec = LEVELS.reduce((a, l) => a + lv24[l], 0);
@@ -619,8 +691,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     el.dataset.tipTitle =
       `${h}h ${down ? "Distracting" : "Productive"}${perDay} Until The ${windowText} Pulse Is 50`;
     el.dataset.tipBody = down
-      ? `Distracting Time This Window Can Still Absorb${perDay ? ` Over The\nNext ${days} Days (If It Otherwise Matches Its Recent Average)` : ""}\nBefore The ${windowText} Pulse Drops To 50.\nVery Distracting Counts Double.`
-      : `Productive Time Needed${perDay ? ` Per Day Over The\nNext ${days} Days (If The Window Otherwise Matches Its Recent Average)` : ""}\nTo Lift The ${windowText} Pulse To 50.\nVery Productive Counts Double.`;
+      ? `Distracting Time This Window Can Still Absorb${perDay ? ` Over The\nNext ${days} Days (If It Otherwise Matches Its Recent Average)` : ""}\nBefore The ${windowText} Pulse Drops To 50.\nDistracting Counts Double.`
+      : `Productive Time Needed${perDay ? ` Per Day Over The\nNext ${days} Days (If The Window Otherwise Matches Its Recent Average)` : ""}\nTo Lift The ${windowText} Pulse To 50.\nWork Counts Double.`;
   };
   to50("24h", lv24, 1, "24-Hour");
   to50("week", curWkLv, 7, "7-Day");
@@ -663,10 +735,6 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   document.getElementById("iconOffline").addEventListener("click", e => {
     e.stopPropagation();
     showOfflineDetail();
-  });
-  document.getElementById("iconReports").addEventListener("click", e => {
-    e.stopPropagation();
-    showBlankDetail("Reports");
   });
   const card24 = document.getElementById("card24h");
   card24.classList.add("trend-zone");
@@ -964,7 +1032,14 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   };
 
   let archivePromise = null;
-  const loadArchive = () => archivePromise ??= loadJson("archive.json", null);
+  const loadArchive = () => archivePromise ??= loadJson("archive.json", null).then(arch => {
+    // archive.json is RAW RescueTime data; apply the dictionary's type/category
+    // overrides here (once) so every archive-based view (Trends, search index,
+    // period details) matches the fetcher-translated data.json
+    if (arch && arch.days && hasOverrides)
+      for (const day in arch.days) arch.days[day] = arch.days[day].map(translateRow);
+    return arch;
+  });
 
   // ---- "x% of all your time": an entity's ALL-TIME hours as a share of
   // EVERY attributable hour in the archive — shown right under the Total
@@ -1030,7 +1105,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     return [...idx.values()];
   });
 
-  // The five productivity TYPES (Very Productive .. Very Distracting) are
+  // The five productivity TYPES (Work .. Distracting) are
   // searchable exactly like categories — with all-time + 30-day totals.
   let lvlIndexPromise = null;
   const lvlIndex = () => lvlIndexPromise ??= loadArchive().then(arch => {
@@ -1326,7 +1401,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         // a "<Category> — <Period>" combo shows that period's hours
         ? (s.bare
           ? `${open}
-               <span class="sug-name">${esc(s.c.name)}</span>
+               <span class="sug-name">${esc(s.alias ?? s.c.name)}${s.alias ? ` <span class="sug-unit">→ ${esc(s.c.name)}</span>` : ""}</span>
                <span class="sug-hours">${hrs(s.c.last30)}h <span class="sug-unit">30d</span></span>
                <span class="sug-hours">${hrs(s.c.total)}h <span class="sug-unit">Total</span></span>
              </div>`
@@ -1423,6 +1498,10 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       if (c.total < MIN_LOGGED_SEC) continue;
       if (matchTier(q, c.name) > 0)
         cat.push({ kind: "cat", c, key, p: defP, bare: true, sec: c.total });
+      // ORIGINAL names merged into this category still search & redirect here
+      for (const al of catAliases[c.name.toLowerCase()] ?? [])
+        if (matchTier(q, al) > 0)
+          cat.push({ kind: "cat", c, key, p: defP, bare: true, sec: c.total, alias: al });
       const cn = c.name.toLowerCase();
       if (!ql.startsWith(cn + " ")) continue;
       const rest = q.slice(cn.length + 1).trim();
@@ -1440,7 +1519,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       }
     }
     const catAll = cat.sort((x, y) => y.sec - x.sec);
-    // apps (≥0.5 h total): the contains-match FILTERS; the ORDER is by hours
+    // apps (≥0.5 h total): match on the display NAME ONLY (no original-name
+    // aliases for apps); the contains-match FILTERS, the ORDER is by hours
     const appAll = apps
       .filter(a => a.total >= MIN_LOGGED_SEC && matchTier(q, a.name) > 0)
       .sort((x, y) => y.total - x.total || y.last30 - x.last30)
@@ -1498,6 +1578,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   sugEl.addEventListener("click", e => {
     const r = e.target.closest(".sug-row");
     if (r) openSug(+r.dataset.i);
+    // the suggestion card fills most of the page; clicking its empty
+    // background (not a row) closes the suggestions
+    else { sugList = []; renderSug(); }
   });
 
   // ---- entity-row navigation (v78): any APP / CATEGORY / TYPE row opens
@@ -1671,7 +1754,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const rowsOf = iso => arch?.days?.[iso]
       ?? (data.day_activities?.[iso] ?? []).map(([, sec, , act, cat, prod]) => [sec, act, cat, prod]);
     // catKey filters by CATEGORY display name — or, with the "lvl:<prod>"
-    // form, by ONE exact productivity type (Productive ≠ Very Productive),
+    // form, by ONE exact productivity type (Productive ≠ Work),
     // or, with the "app:<name>" form (v78), by ONE app (display-merged) —
     // that turns this into the period-scoped APP detail card
     const lvlKey = catKey?.startsWith("lvl:") ? catKey.slice(4) : null;
@@ -1755,9 +1838,9 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // hours for the CURRENT period (left) and the PREVIOUS one (right),
     // all six bars sharing ONE scale so lengths are comparable ----
     const BUCKETS = [
-      ["Productive",  ["2", "1"],   "Very Productive + Productive"],
+      ["Productive",  ["2", "1"],   "Work + Productive"],
       ["Neutral",     ["0"],        "Neutral"],
-      ["Distracting", ["-1", "-2"], "Distracting + Very Distracting"],
+      ["Distracting", ["-1", "-2"], "Personal + Distracting"],
     ];
     const sumLv = (A, levels) => levels.reduce((s, l) => s + A.lv[l], 0);
     // only the CURRENT period's bars are drawn (the prior-period cells were
@@ -1824,10 +1907,28 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // category/type cards: the entity's ALL-TIME hours as a share of every
     // attributable hour — the "x% of all your time" line under Total Logged
     let entAllSec = 0;
+    // for the APP detail card: tally this app's (effective) category + type so
+    // we can show a "<category> — <type>" row (category renamed if the dict
+    // renamed it, else the raw RescueTime name; both coloured by the type)
+    const appCatSec = new Map(), appLvSec = emptyLevels();
     if (catKey)
       for (const dayRows of Object.values(arch?.days ?? {}))
         for (const [sec, act, cat, prod] of dayRows)
-          if (inCat(cat, prod, act)) entAllSec += sec;
+          if (inCat(cat, prod, act)) {
+            entAllSec += sec;
+            if (appKey) {
+              appCatSec.set(cat, (appCatSec.get(cat) ?? 0) + sec);
+              if (LEVELS.includes(String(prod))) appLvSec[String(prod)] += sec;
+            }
+          }
+    let appCatLabel = "", appTypeLvl = null;
+    if (appKey) {
+      let bc = "", bcs = -1;
+      for (const [c, s] of appCatSec) if (s > bcs) { bcs = s; bc = c; }
+      appCatLabel = catName(bc);
+      let bl = -1;
+      for (const l of LEVELS) if (appLvSec[l] > bl) { bl = appLvSec[l]; appTypeLvl = l; }
+    }
     // entity cards (v80): FOUR aligned columns on ONE grid — this period's
     // hours with the entity's share OF THAT PERIOD right underneath, the
     // entity's all-time hours with its share of ALL logged time underneath,
@@ -1845,7 +1946,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       // grid (v93): [This Period][Logged In Total] tight on the left, a BIG
       // scalable trend filling the middle (both rows), the prior period
       // right-anchored (both rows). Row 2 = the two share %s under the left cols.
-      return `<div class="ent-grid">
+      return `<div class="ent-grid${appKey && appTypeLvl !== null ? " ent-hascat" : ""}">
         ${cell(hrs(totalSec) + "h", "This Period", " ent-a", totalAttrs)}
         ${cell(hrs(entAllSec) + "h", "Logged In Total", " ent-b",
            tip(`${catDisplay}: ${hrs(entAllSec)}h All Time`, "All Recorded Data"))}
@@ -1862,6 +1963,10 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           : cell(allPct + "%", "Of All Your Time", " ent-share ent-d",
               tip(`${allPct}% Of All Your Time`,
                 `${hrs(entAllSec)}h Of ${hrs(gt)}h Total Logged\n${catDisplay} Across All Recorded Data`))}
+        ${appKey && appTypeLvl !== null ? `<div class="ent-cat">
+             <span class="ent-catname" style="color:${COLORS[appTypeLvl]}">${esc(appCatLabel)}</span>
+             <span class="ent-cattype" style="color:${COLORS[appTypeLvl]}">${esc(NAMES[appTypeLvl])}</span>
+           </div>` : ""}
         </div>`;
     };
     // Total page (v81): an "Average Per Day" line right under Total Logged
@@ -2265,8 +2370,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
                           : `\nNothing Logged In ${p.prevLabel} (No Trend)`) +
           (tops ? "\n" + tops : ""), pct];
       });
-    // types: one bar per productivity level (Very Productive .. Very
-    // Distracting) in the level's own colour, sorted by hours like the lists
+    // types: one bar per productivity level (Work .. Distracting) in the level's own colour, sorted by hours like the lists
     const typeEntries = LEVELS
       .map(l => {
         const sec = curA.lv[l], prevSec = prevA.lv[l];
@@ -2290,8 +2394,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const renderTypesTab = () => {
       renderBarList("periodApps", typeEntries);
       const combos = [
-        ["Productive",  ["2", "1"],        "Very Productive + Productive"],
-        ["Distracting", ["0", "-1", "-2"], "Neutral + Distracting + Very Distracting"],
+        ["Productive",  ["2", "1"],        "Work + Productive"],
+        ["Distracting", ["0", "-1", "-2"], "Neutral + Personal + Distracting"],
       ];
       const sum = (A, ls) => ls.reduce((s, l) => s + A.lv[l], 0);
       const maxC = Math.max(1, ...combos.map(([, ls]) => sum(curA, ls)));
@@ -2986,6 +3090,12 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   //      24 hours. Opened by the pulse card's power icon. ----
   let offlineEntries = [];      // offline activities (persisted to localStorage)
   const OFF_LS = { entries: "rtOfflineEntries", acts: "rtOfflineActs", key: "rtOfflineKey", list: "rtOfflineActList" };
+  // IN-MEMORY draft of the Add-Activity form (selected activity, details text,
+  // from/until, drag range, chosen day, custom name). It survives CLOSING and
+  // reopening the Manual Activities page, but NOT a full page/tab reload — so
+  // the form is only reset to defaults after a successful Add or when the tab
+  // is closed. Deliberately NOT in localStorage.
+  let offDraft = {};
   function showOfflineDetail() {
     destroyDetailCharts();
     setSwitch(null);
@@ -3028,13 +3138,20 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     let apiKey = lsGet(OFF_LS.key) || "";
     const persist = () => { lsSet(OFF_LS.entries, JSON.stringify(offlineEntries)); lsSet(OFF_LS.list, JSON.stringify(acts)); };
 
-    let selAct = acts[0] ?? "";
-    let customMode = false, customName = "";   // "Custom" button = one-off name (NOT saved)
-    let detailsText = "";                       // survives form re-renders
-    let wkOffset = 0;                       // 0 = current week
-    let selDay = new Date(now).getTime();   // midnight of the selected day (today)
-    let selFrom = null, selUntil = null;    // "HH:MM" once picked (drag/click/edit)
-    let dragStartMs = null, dragEndMs = null;   // absolute drag range (may cross days)
+    // seed the form from the in-memory draft (kept across close/reopen); fall
+    // back to defaults on first open / after a reset
+    let selAct = (offDraft.selAct && acts.includes(offDraft.selAct)) ? offDraft.selAct : (acts[0] ?? "");
+    let customMode = offDraft.customMode ?? false, customName = offDraft.customName ?? "";   // "Custom" button = one-off name (NOT saved)
+    let detailsText = offDraft.detailsText ?? "";   // survives form re-renders AND page close/reopen
+    let wkOffset = offDraft.wkOffset ?? 0;                       // 0 = current week
+    let selDay = offDraft.selDay ?? new Date(now).getTime();     // midnight of the selected day (today)
+    let selFrom = offDraft.selFrom ?? null, selUntil = offDraft.selUntil ?? null;    // "HH:MM" once picked (drag/click/edit)
+    let dragStartMs = offDraft.dragStartMs ?? null, dragEndMs = offDraft.dragEndMs ?? null;   // absolute drag range (may cross days)
+    // snapshot the current form state into the draft so it is remembered when
+    // the page is closed and reopened; called after every form change
+    const saveDraft = () => {
+      offDraft = { selAct, customMode, customName, detailsText, wkOffset, selDay, selFrom, selUntil, dragStartMs, dragEndMs };
+    };
     const COG_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
 
     host.innerHTML = `
@@ -3064,14 +3181,19 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const topH = new Date(nowMs); topH.setMinutes(0, 0, 0, 0);
       const slots = [];               // index 0 = current hour (top), older downward
       for (let i = 0; i < DAY_HOURS; i++)
-        slots.push({ start: topH.getTime() - i * HOUR, lv: emptyLevels(), off: 0, labels: [] });
+        slots.push({ start: topH.getTime() - i * HOUR, lv: emptyLevels(), off: 0, labels: [], apps: new Map() });
       const idxOf = ms => Math.round((topH.getTime() - ms) / HOUR);
-      for (const [t, sec, , , , prod] of (data.hour_activities ?? [])) {
+      for (const [t, sec, , activity, , prod] of (data.hour_activities ?? [])) {
         const d = new Date(t); d.setMinutes(0, 0, 0, 0);
         const i = idxOf(d.getTime());
         if (i < 0 || i >= DAY_HOURS) continue;
         const l = String(prod);
         if (l in slots[i].lv) slots[i].lv[l] += sec;
+        const an = appName(activity);   // for the hover tooltip's top-apps list
+        const ae = slots[i].apps.get(an) ?? { sec: 0, prod, maxSec: 0 };
+        ae.sec += sec;
+        if (sec >= ae.maxSec) { ae.maxSec = sec; ae.prod = prod; }   // keep the dominant type
+        slots[i].apps.set(an, ae);
       }
       for (const e of offlineEntries) {
         // spread the entry across EVERY hour it covers (so a multi-hour block
@@ -3104,11 +3226,23 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
             ? `<div class="oh-seg" style="width:${w(s.lv[l])}%;background:${COLORS[l]}"></div>` : "").join("")
           + (s.off > 0 ? `<div class="oh-seg oh-off" style="width:${w(s.off)}%"></div>` : "");
         const tot = LEVELS.reduce((a, l) => a + s.lv[l], 0) + s.off;
-        const tip = (tot > 0
-          ? `${fmtHour(s.start)} — ${hrs(tot)}h logged${s.labels.length ? " · " + s.labels.join(", ") : ""}`
-          : `${fmtHour(s.start)} — blank`).replace(/"/g, "&quot;");
+        // rich hover tooltip: total on top, per-type breakdown, then the top-5
+        // apps stacked. Hours under 0.1h show only the total (no types/apps).
+        let tipTitle = tot > 0 ? `${hrs(tot)}h total Time` : "No time logged";
+        let tipBody = "";
+        if (tot >= 360) {   // 0.1h = 360s
+          const typeStr = LEVELS.filter(l => s.lv[l] > 0)
+            .map(l => `${hrs(s.lv[l])}h ${NAMES[l]}`).join(", ");
+          // app rows: "<hours> <name>" on the left, the app's TYPE on the right
+          // (tab-separated; the tooltip renderer splits it into a two-side row)
+          const appStr = [...s.apps].sort((a, b) => b[1].sec - a[1].sec)
+            .filter(([, e]) => hrs(e.sec) > 0).slice(0, 5)   // drop apps that round to 0h
+            .map(([n, e]) => `${hrs(e.sec)}h ${n}\t${NAMES[String(e.prod)] ?? ""}`).join("\n");
+          tipBody = [typeStr, appStr].filter(Boolean).join("\n");
+        }
+        const tipAttrs = `data-tip-title="${esc(tipTitle)}"` + (tipBody ? ` data-tip-body="${esc(tipBody)}"` : "");
         return divider + `<div class="oh-row"><div class="oh-time">${fmtHour(s.start)}</div>` +
-          `<div class="oh-track" data-start="${s.start}" title="${tip}">${segs}</div></div>`;
+          `<div class="oh-track" data-start="${s.start}" ${tipAttrs}>${segs}</div></div>`;
       }).join("");
       // click / drag selection is wired once on dayEl (delegated) below
     }
@@ -3128,15 +3262,33 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         el.innerHTML = `<div class="off-recent-empty">No offline activities added yet.</div>`;
         return;
       }
-      el.innerHTML =
-        [...offlineEntries].reverse().map(e => {
-          const when = new Date(e.startMs).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-          return `<div class="off-rec-row">
-              <span class="off-rec-name">${(e.activity || "").replace(/</g, "&lt;")}</span>
-              <span class="off-rec-meta">${when} · ${fmtClock(e.startMs)} · ${e.durMin}m</span>
-              ${e.details ? `<span class="off-rec-det">${e.details.replace(/</g, "&lt;")}</span>` : ""}
-            </div>`;
-        }).join("");
+      // group entries added together (same gid) so an activity that was
+      // auto-split into ≤4h blocks shows as ONE row (time range + block count).
+      // Legacy entries with no gid each stand alone.
+      const groups = [];
+      for (const e of offlineEntries) {
+        const last = groups[groups.length - 1];
+        if (last && e.gid != null && last.gid === e.gid) last.items.push(e);
+        else groups.push({ gid: e.gid, items: [e] });
+      }
+      el.innerHTML = [...groups].reverse().map(g => {
+        const items = g.items;
+        const act = items[0].activity || "", det = items[0].details || "";
+        const start = Math.min(...items.map(i => i.startMs));
+        const end = Math.max(...items.map(i => i.startMs + i.durMin * 60000));
+        const n = items.length;
+        const when = new Date(start).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+        // middle: the time range + (only when it was split) the block count
+        const range = `${fmtClock(start)} – ${fmtClock(end)}` + (n > 1 ? ` · ${n}×` : "");
+        return `<div class="off-rec-row">
+            <div class="off-rec-top">
+              <span class="off-rec-name">${act.replace(/</g, "&lt;")}</span>
+              <span class="off-rec-mid">${range}</span>
+              <span class="off-rec-date">${when}</span>
+            </div>
+            ${det ? `<span class="off-rec-det">${det.replace(/</g, "&lt;")}</span>` : ""}
+          </div>`;
+      }).join("");
     }
 
     // LEFT: the add-activity form (week/day picker, from/until, activity chips,
@@ -3198,8 +3350,8 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       formEl.querySelectorAll(".off-day").forEach(b =>
         b.addEventListener("click", () => { selDay = +b.dataset.day; dragStartMs = dragEndMs = null; renderForm(); scrollToDay(selDay); }));
       // manual time edits cancel any drag range (they define a single-day block)
-      document.getElementById("offFrom").addEventListener("change", e => { selFrom = e.target.value; dragStartMs = dragEndMs = null; });
-      document.getElementById("offUntil").addEventListener("change", e => { selUntil = e.target.value; dragStartMs = dragEndMs = null; });
+      document.getElementById("offFrom").addEventListener("change", e => { selFrom = e.target.value; dragStartMs = dragEndMs = null; saveDraft(); });
+      document.getElementById("offUntil").addEventListener("change", e => { selUntil = e.target.value; dragStartMs = dragEndMs = null; saveDraft(); });
       formEl.querySelectorAll(".off-wk-nav").forEach(b =>
         b.addEventListener("click", () => { if (b.disabled) return; wkOffset = Math.min(0, wkOffset + (+b.dataset.wk)); renderForm(); }));
       formEl.querySelectorAll(".off-act").forEach(b =>
@@ -3207,12 +3359,13 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           if (b.id === "offCustomBtn") { customMode = true; renderForm(); document.getElementById("offCustomName")?.focus(); }
           else { customMode = false; selAct = b.dataset.act; renderForm(); }
         }));
-      document.getElementById("offCustomName")?.addEventListener("input", e => { customName = e.target.value; });
+      document.getElementById("offCustomName")?.addEventListener("input", e => { customName = e.target.value; saveDraft(); });
       // live character counter (counts DOWN from 40)
       const det = document.getElementById("offDetails");
-      det.addEventListener("input", () => { detailsText = det.value; document.getElementById("offCount").textContent = 40 - det.value.length; });
+      det.addEventListener("input", () => { detailsText = det.value; document.getElementById("offCount").textContent = 40 - det.value.length; saveDraft(); });
       document.getElementById("offCog").addEventListener("click", () => openModal());
       document.getElementById("offAdd").addEventListener("click", onAdd);
+      saveDraft();          // remember the current form state across close/reopen
       renderRecent();
     }
 
@@ -3244,15 +3397,18 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       // into back-to-back ≤4 h blocks — one post per block.
       const chunks = [];
       let cs = startMs, rem = durMin;
+      const gid = Date.now();   // one id for this whole add, so auto-split blocks group into ONE row
       while (rem > 0) {
         const d = Math.min(MAX_BLOCK_MIN, rem);
-        chunks.push({ startMs: cs, durMin: d, activity, details });
+        chunks.push({ startMs: cs, durMin: d, activity, details, gid });
         cs += d * 60000; rem -= d;
       }
       offlineEntries.push(...chunks);
       persist();
-      // reset the picker + form for the next entry
-      dragStartMs = dragEndMs = null; selFrom = selUntil = null;
+      // SUCCESSFUL ADD -> reset the add-activity fields to default (this also
+      // clears the remembered draft via renderForm -> saveDraft). The calendar
+      // day/week the user navigated to stays put.
+      selAct = acts[0] ?? ""; dragStartMs = dragEndMs = null; selFrom = selUntil = null;
       detailsText = ""; customMode = false; customName = "";
       renderForm();          // rebuilds the form (also calls renderRecent)
       renderTimeline();
@@ -3632,7 +3788,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       if (catElId) renderBarList(catElId, cats);
     }
 
-    // productivity TYPES (Very Productive .. Very Distracting) over a set of
+    // productivity TYPES (Work .. Distracting) over a set of
     // activity rows, rendered like the category cards. Feeds the front page's
     // "Top Types - 7 Days" card (replaced the old 30-day categories card).
     function renderTypes(rows, listId, mixId, perLabel) {
@@ -3655,18 +3811,19 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
             `${hrs(sec)}h ${NAMES[l]}\n${share} Of Your ${perLabel} Time` +
             (tops ? "\n" + tops : ""), share,
             { kind: "lvl", key: l, period: perLabel }];
-        })
-        .sort((a, b) => b[1] - a[1]);
+        });
+      // STATIC type order (Work, Productive, Neutral, Personal, Distracting) —
+      // LEVELS is already in that order, so DON'T sort by hours here.
       renderBarList(listId, entries);
       if (mixId) {
         const prod = lv["2"] + lv["1"], neut = lv["0"], dist = lv["-1"] + lv["-2"];
         const el = document.getElementById(mixId);
-        el.textContent = `${hrs(prod)}h Productive - ${hrs(neut)}h Neutral - ${hrs(dist)}h Distracting`;
+        el.textContent = `${hrs(grand)}h Logged`;   // just the period total (like the other cards)
         el.dataset.tipTitle = `${perLabel}: ${hrs(grand)}h Logged`;
         el.dataset.tipBody =
-          `Very Productive ${hrs(lv["2"])}h + Productive ${hrs(lv["1"])}h\n` +
+          `Work ${hrs(lv["2"])}h + Productive ${hrs(lv["1"])}h\n` +
           `Neutral ${hrs(neut)}h\n` +
-          `Distracting ${hrs(lv["-1"])}h + Very Distracting ${hrs(lv["-2"])}h`;
+          `Personal ${hrs(lv["-1"])}h + Distracting ${hrs(lv["-2"])}h`;
       }
     }
 
@@ -3786,12 +3943,12 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         for (const [, sec, , , , prod] of rows ?? []) lv[String(prod)] += sec;
         const prod = lv["2"] + lv["1"], neut = lv["0"], dist = lv["-1"] + lv["-2"];
         const el = document.getElementById(id);
-        el.textContent = `${hrs(prod)}h Productive - ${hrs(neut)}h Neutral - ${hrs(dist)}h Distracting`;
+        el.textContent = `${hrs(prod + neut + dist)}h Logged`;   // just the period total (like the other cards)
         el.dataset.tipTitle = `${label}: ${hrs(prod + neut + dist)}h Logged`;
         el.dataset.tipBody =
-          `Very Productive ${hrs(lv["2"])}h + Productive ${hrs(lv["1"])}h\n` +
+          `Work ${hrs(lv["2"])}h + Productive ${hrs(lv["1"])}h\n` +
           `Neutral ${hrs(neut)}h\n` +
-          `Distracting ${hrs(lv["-1"])}h + Very Distracting ${hrs(lv["-2"])}h`;
+          `Personal ${hrs(lv["-1"])}h + Distracting ${hrs(lv["-2"])}h`;
       };
       setMix("mixWeekCats", week7Rows, "Current 7 Days");
     });
@@ -3877,10 +4034,10 @@ function makeDeltas(elId, lv, acts, appName, prevLv, refs) {
     : "";
   const rows = el.querySelectorAll(".cat-row");
   rows[0].dataset.tipTitle = `${prodH}h Productive - Of ${totalH}h Logged`;
-  rows[0].dataset.tipBody = "Very Productive + Productive\n" +
+  rows[0].dataset.tipBody = "Work + Productive\n" +
     vsNote(prodVs, prevProdH) + widthNote(refs?.prod) + topApps(["2", "1"]);
   rows[1].dataset.tipTitle = `${downH}h Neutral + Distracting - Of ${totalH}h Logged`;
-  rows[1].dataset.tipBody = "Neutral + Distracting + Very Distracting\n" +
+  rows[1].dataset.tipBody = "Neutral + Personal + Distracting\n" +
     vsNote(downVs, prevDownH) + widthNote(refs?.down) + topApps(["0", "-1", "-2"]);
 }
 </script>

@@ -98,12 +98,14 @@ body {
    before its pulse drops to 50 (flips to the Productive hours needed when
    the pulse is below 50). Value on top, "Dist/Prod Needed" hanging below. ----*/
 /* stat + ring ride in one centered flex row per period column */
+/* three-track grid so the ring stays CENTRED in the column while the
+   hours-to-50 stat sits at the LEFT edge of the cell (left | ring | spacer) */
 .ring-row {
-  display: flex; align-items: center; justify-content: center;
-  gap: clamp(4px, 0.7vw, 12px);
+  display: grid; grid-template-columns: 1fr min(92px, 56cqw) 1fr;
+  align-items: center; gap: clamp(4px, 0.7vw, 12px);
 }
-.ring-row .pulse-wrap { margin: 0; flex: 0 0 min(92px, 56%); }
-.ring-stat { min-width: 0; display: flex; align-items: center; }
+.ring-row .pulse-wrap { margin: 0; grid-column: 2; width: 100%; }
+.ring-stat { min-width: 0; grid-column: 1; display: flex; align-items: center; text-align: left; }
 .ring-stat .stat-inner { position: relative; transform: translateY(-0.35rem); }
 .ring-stat-val {
   font-size: 0.8rem; font-weight: 600; color: var(--text);  /* = card title size */
@@ -117,6 +119,19 @@ body {
 /* hours-to-50 value: SAME size as the pulse numbers (41cqw of the 92px ring
    wrap ≈ 37.7px ≈ 2.7rem), coloured red/blue from JS like the pulse itself */
 .ring-stat-val.big { font-size: 2.7rem; font-weight: 700; line-height: 1; }
+
+/* pulse card: History + OFF quick-links stacked in the top-left corner */
+#pulseCard { position: relative; }
+.card-icons {
+  position: absolute; top: 0.5em; left: 0.6em; z-index: 3;
+  display: flex; flex-direction: column; gap: 0.5em;
+}
+.card-icons .card-icon {
+  background: none; border: 0; padding: 0.15em; cursor: pointer;
+  color: #fff; line-height: 0; opacity: 0.85;
+}
+.card-icons .card-icon:hover { opacity: 1; }
+.card-icons .card-icon svg { width: 1.4rem; height: 1.4rem; display: block; }
 
 /* card title row with a right-anchored stat (the 14-day card's daily average) */
 .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6em; }
@@ -313,17 +328,23 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
    the CURRENT rolling windows (Current 7 Days / Current 30 Days / Current
    Year), Total to all recorded data. Same recessed/active colours as the
    browser-style tabs; the ACTIVE pill marks the period currently shown. */
+/* three zones on one row: prev/next nav (left) | label (centred) | period
+   pills (right) */
 .pswitch {
-  display: flex; align-items: center; gap: 0.4em; flex-wrap: wrap;
-  margin-top: 0.55em;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: 0.6em; margin-top: 0.55em;
 }
+.pswitch-nav { justify-self: start; display: flex; gap: 0.4em; }
+.pswitch-pills { justify-self: end; display: flex; gap: 0.4em; flex-wrap: wrap; justify-content: flex-end; }
 .pswitch-label {
+  justify-self: center; text-align: center;
   font-size: 0.8rem; font-weight: 600; letter-spacing: 0.09em;
-  text-transform: uppercase; color: var(--text-dim); margin-right: 0.3em;
+  text-transform: uppercase; color: var(--text-dim);
 }
+.pswitch-btn[disabled] { opacity: 0.35; cursor: default; }
 .pswitch-btn {
-  cursor: pointer; font: inherit; font-size: 0.9rem;
-  padding: 0.25em 1em; border: 1px solid var(--panel-edge);
+  cursor: pointer; font: inherit; font-size: 0.9rem; font-weight: 600;
+  padding: 0.45em 1em; border: 1px solid var(--panel-edge);   /* = tab size */
   border-radius: 999px; background: var(--track); color: #6a6a6a;
 }
 .pswitch-btn:not(.active):hover { color: var(--text-dim); }
@@ -397,6 +418,11 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
    rows; clicking a tab swaps in ONE graph that fills the whole card */
 .trend-chart { position: relative; flex: 1 1 auto; min-height: 8rem; }
 .trend-chart.fill { flex: 1 1 auto; min-height: 0; margin-top: 0.4em; }
+/* non-combined trend tab: the line chart (3 parts) stacked over a 14-day-style
+   bar view of the same period (1 part) — bar graph = 1/3 of the line graph */
+.trend-split { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; margin-top: 0.4em; }
+.trend-split .tline { flex: 3 1 0; min-height: 0; margin-top: 0; }
+.trend-split .tbar  { flex: 1 1 0; min-height: 0; margin-top: 0.4em; }
 .trend-body {
   flex: 1 1 auto; min-height: 0; margin-top: 0.4em;
   display: flex; flex-direction: column;
@@ -424,20 +450,21 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
    card's own background and merges into the content below, inactive tabs
    sit recessed on the darker track */
 .tab-row {
-  display: flex; gap: 0.3em; flex-wrap: wrap; align-items: flex-end;
-  border-bottom: 1px solid var(--panel-edge);
+  display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center;
 }
+/* tabs are now PILL BUTTONS, identical in shape/size to the .pswitch-btn
+   period pills (user spec) — plain case, not the old baseline tab look */
 .tab-row .tab {
-  cursor: pointer;
-  margin: 0 0 -1px 0; padding: 0.45em 1em 0.4em;
-  border: 1px solid var(--panel-edge); border-bottom: none;
-  border-radius: 8px 8px 0 0;
+  cursor: pointer; font-size: 0.9rem; font-weight: 600;
+  text-transform: none; letter-spacing: normal;
+  margin: 0; padding: 0.45em 1em;
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
   background: var(--track); color: #6a6a6a;
 }
 .tab-row .tab:not(.active):hover { color: var(--text-dim); }
 .tab-row .tab.active {
-  background: var(--panel); color: var(--text);
-  border-bottom: 1px solid var(--panel);   /* cuts the row's baseline under it */
+  background: var(--panel-edge); color: var(--text);
 }
 /* NON-clickable group words in front of tabs (Weekly / Monthly / Yearly on
    the Trends card) — plain labels on the tab baseline, no box. FIXED width
@@ -488,17 +515,35 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
    "value + label" style as the Total Logged cell */
 .ent-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 1.2fr);
-  gap: 0 0.6em; align-items: center; padding: 0 0.3em;
+  /* This Period | Logged In Total (tight) | BIG trend (fills) | Prior (right).
+     Explicit areas so the trend + prior span both rows regardless of source order. */
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "a b trend prior"
+                       "c d trend prior";
+  gap: 0 0.5em; align-items: center; padding: 0 0.3em;
+  container-type: inline-size;
 }
+.ent-grid .ent-a { grid-area: a; }
+.ent-grid .ent-b { grid-area: b; }
+.ent-grid .ent-c { grid-area: c; }
+.ent-grid .ent-d { grid-area: d; }
 .ent-grid .cat-label {
   position: static; pointer-events: auto; height: 2rem; min-width: 0;
 }
 .ent-grid .cat-time { font-weight: 600; }
 .ent-grid .ent-share { color: var(--text-dim); }
-.ent-grid .app-trend {
+/* the trend fills the whole middle column across BOTH rows and scales with
+   the column width, like the pulse card's trend line */
+.ent-grid .ent-trend {
+  grid-area: trend;
   display: flex; align-items: center; justify-content: center;
-  height: 2rem; overflow: visible; text-align: center;
+  height: auto; overflow: visible; text-align: center; white-space: nowrap;
+  font-size: clamp(0.85rem, 8cqw, 1.7rem); font-weight: 600;
+}
+/* the prior-period cell spans both rows and hugs the RIGHT edge */
+.ent-grid .ent-prior {
+  grid-area: prior; height: auto;
+  justify-content: flex-end; text-align: right;
 }
 /* v80: bars on the detail-page lists stop IN FRONT of the graph-colour
    square instead of running under it — the card background stays visible

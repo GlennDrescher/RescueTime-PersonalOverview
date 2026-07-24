@@ -25,20 +25,37 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# When run by double-clicking, the window closes the instant the script ends.
+# So: on SUCCESS show a message and auto-close after 5 s; on FAILURE show the
+# error and wait for a key press so you can actually read it.
+function Fail([string]$msg) {
+  Write-Host ""
+  Write-Host $msg -ForegroundColor Red
+  Write-Host ""
+  Read-Host "Fetch FAILED - press Enter to close"
+  exit 1
+}
+
 # Find a Python (Serve-Website.ps1 already relies on one being installed)
 $py = Get-Command python -ErrorAction SilentlyContinue
 if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
-if (-not $py) { Write-Host "Python not found on PATH - install it first." -ForegroundColor Red; exit 1 }
+if (-not $py) { Fail "Python not found on PATH - install it first." }
 
 $script = Join-Path $PSScriptRoot "scripts\fetch-addition.py"
 $pyArgs = @($script, "--refresh-days", $RefreshDays)
 if ($Rebuild) { $pyArgs += "--rebuild" }
 
-& $py.Source @pyArgs
-if ($LASTEXITCODE -ne 0) {
-  Write-Host ""
-  Write-Host "Fetch failed - see the messages above." -ForegroundColor Red
-  exit $LASTEXITCODE
+try {
+  & $py.Source @pyArgs
+  $code = $LASTEXITCODE
+} catch {
+  Fail "Fetch failed - $($_.Exception.Message)"
 }
+if ($code -ne 0) { Fail "Fetch failed (exit $code) - see the messages above." }
+
 Write-Host ""
+Write-Host "Fetch succeeded." -ForegroundColor Green
 Write-Host "View:  .\Serve-Website.ps1  ->  http://localhost:8000/index.html" -ForegroundColor Green
+Write-Host ""
+Write-Host "Closing in 5 seconds..." -ForegroundColor Green
+Start-Sleep -Seconds 5

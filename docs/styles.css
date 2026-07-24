@@ -45,6 +45,7 @@ body {
   text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.3em;
   flex: 0 0 auto;
 }
+.card h2.tc { text-transform: none; }   /* the Manual Activities title stays title-case */
 .chart-fill { position: relative; flex: 1 1 auto; min-height: 14.25rem; }  /* 50% taller cards (was 9.5rem) */
 
 /* phones in landscape: one full-screen card per swipe */
@@ -105,17 +106,28 @@ body {
   align-items: center; gap: clamp(4px, 0.7vw, 12px);
 }
 .ring-row .pulse-wrap { margin: 0; grid-column: 2; width: 100%; }
-.ring-stat { min-width: 0; grid-column: 1; display: flex; align-items: center; text-align: left; }
-.ring-stat .stat-inner { position: relative; transform: translateY(-0.35rem); }
+/* stat sits CENTRED in its cell (col 1); the value's own box is vertically
+   centred in the ring-row so the big number lines up with the ring's pulse
+   number (both at the row's vertical middle) */
+.ring-stat { min-width: 0; grid-column: 1; position: relative; display: flex;
+  align-items: center; justify-content: center; text-align: center; }
+.ring-stat .stat-inner { position: static; }
 .ring-stat-val {
   font-size: 0.8rem; font-weight: 600; color: var(--text);  /* = card title size */
   font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.2;
 }
-/* multi-line stat label hangs BELOW the value (like the ring labels) */
-.ring-stat .row-label.multi {
-  position: absolute; top: 100%; left: 0;
-  white-space: normal; line-height: 1.25;
+/* stat labels mirror the ring's own labels: "Need" ABOVE the number, then
+   "Hours of" / "Productive"|"Distracting" BELOW it. Both are absolute so the
+   NUMBER stays vertically centred in the row (aligned with the pulse number),
+   and centred across the WHOLE cell so a narrow value doesn't shove them under
+   the ring. */
+.ring-stat-top, .ring-stat-bot {
+  position: absolute; left: 0; right: 0; text-align: center;
+  font-size: 0.62rem; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-dim); line-height: 1.2;
 }
+.ring-stat-top { bottom: calc(50% + 1.35rem); }
+.ring-stat-bot { top: calc(50% + 1.35rem); }
 /* hours-to-50 value: SAME size as the pulse numbers (41cqw of the 92px ring
    wrap ≈ 37.7px ≈ 2.7rem), coloured red/blue from JS like the pulse itself */
 .ring-stat-val.big { font-size: 2.7rem; font-weight: 700; line-height: 1; }
@@ -128,10 +140,10 @@ body {
 }
 .card-icons .card-icon {
   background: none; border: 0; padding: 0.15em; cursor: pointer;
-  color: #fff; line-height: 0; opacity: 0.85;
+  color: var(--text-dim); line-height: 0;   /* same grey as the card's text */
 }
-.card-icons .card-icon:hover { opacity: 1; }
-.card-icons .card-icon svg { width: 1.4rem; height: 1.4rem; display: block; }
+.card-icons .card-icon:hover { color: var(--text); }   /* brighten on hover */
+.card-icons .card-icon svg { width: 2.8rem; height: 2.8rem; display: block; }
 
 /* card title row with a right-anchored stat (the 14-day card's daily average) */
 .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6em; }
@@ -263,7 +275,7 @@ body {
   font: inherit; font-size: 0.85rem; line-height: 1.4;
   padding: 0.4em 0.7em; outline: none;
 }
-.search-input:focus { border-color: var(--pulse); }
+.search-input:focus { border-color: #fff; }
 .search-input::placeholder { color: var(--text-dim); }
 /* the suggestions overlay is a CARD with the same geometry as the detail
    cards: same gap under the search bar (grid gap + the bar card's 1px
@@ -345,10 +357,10 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .pswitch-btn {
   cursor: pointer; font: inherit; font-size: 0.9rem; font-weight: 600;
   padding: 0.45em 1em; border: 1px solid var(--panel-edge);   /* = tab size */
-  border-radius: 999px; background: var(--track); color: #6a6a6a;
+  border-radius: 999px; background: var(--panel-edge); color: var(--text-dim);  /* unselected = lighter grey */
 }
-.pswitch-btn:not(.active):hover { color: var(--text-dim); }
-.pswitch-btn.active { background: var(--panel-edge); color: var(--text); }
+.pswitch-btn:not(.active):hover { color: var(--text); }
+.pswitch-btn.active { background: var(--track); color: var(--text); }  /* selected = dark, like the search bar */
 /* the whole detail card runs LARGER type than the rest of the dashboard —
    it's a reading surface, not a widget tile */
 #appDetailCard .app-head h2 { font-size: 1.15rem; }
@@ -423,6 +435,157 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
 .trend-split { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; margin-top: 0.4em; }
 .trend-split .tline { flex: 3 1 0; min-height: 0; margin-top: 0; }
 .trend-split .tbar  { flex: 1 1 0; min-height: 0; margin-top: 0.4em; }
+
+/* ---- Offline Activities page: LEFT add-form | RIGHT day timeline ---- */
+/* fill the whole card height so each column can scroll independently */
+.offline-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.4em; margin-top: 0.6em; padding: 0 1.5em;   /* wider inner margins L/R */
+  flex: 1 1 auto; min-height: 0; align-items: stretch;
+}
+.offline-form { display: flex; flex-direction: column; gap: 0.9em; min-height: 0; align-items: center;
+  padding-top: 0.9em; }   /* nudge down so "Add Activity" lines up with the calendar's "Today" */
+/* centre the left-column elements horizontally; the ones that should span the
+   full width opt back in with align-self: stretch */
+.off-week, .off-acts, .off-details, .off-recent { align-self: stretch; }
+.off-label, .off-new, .off-hint { text-align: center; }
+/* week / day picker — BIG prev/next arrows spanning the day-button height */
+.off-week { display: flex; align-items: stretch; gap: 0.4em; }
+.off-wk-nav { background: none; border: 0; color: var(--text-dim); cursor: pointer;
+  font-size: 2.8rem; line-height: 1; padding: 0; display: flex; align-items: flex-end;
+  justify-content: center; }
+.off-wk-nav:hover { color: var(--text); }
+.off-wk-nav[disabled] { color: #3a3a3a; cursor: default; }
+.off-cal { flex: 1 1 auto; min-width: 0; }
+.off-wd-row, .off-day-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.3em; text-align: center; }
+.off-wd { font-size: 0.8rem; color: var(--text-dim); padding-bottom: 0.3em; }
+/* day / activity / add buttons all reuse the .pswitch-btn pill look; these
+   rules only tweak layout (fill the grid cell, sensible padding) */
+.off-day { padding: 0.5em 0; }
+.off-acts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5em; }
+.off-act { padding: 0.6em 0.4em; }
+/* Add Activity centred in the WHOLE column (middle of a 3-col grid, so it's the
+   same width as an activity button) with the cog to its right — the cog does
+   NOT shift Add off-centre */
+.off-add-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5em;
+  align-items: center; align-self: stretch; }
+.off-add { grid-column: 2; grid-row: 1; justify-self: stretch; margin: 0; padding: 0.6em 0.4em; }
+.off-cog { grid-column: 3; grid-row: 1; justify-self: start; }
+/* from / until */
+.off-time-row { display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; }
+.off-tlabel { color: var(--text-dim); font-size: 0.95rem; }
+.off-time { background: var(--panel-edge); border: 1px solid var(--panel-edge); border-radius: 6px;
+  color: var(--text); padding: 0.4em 0.6em; font-size: 0.95rem; font-family: inherit; color-scheme: dark; }
+.off-time:focus { border-color: #fff; outline: none; }
+.off-label { font-size: 0.9rem; font-weight: 600; color: var(--text); margin-top: 0.1em; }
+.off-newlink { color: var(--text); text-decoration: underline; font-weight: 600; cursor: pointer; }
+.off-new-edit { display: inline-flex; gap: 0.4em; margin-left: 0.3em; align-items: center; }
+.off-newinput { background: var(--track); border: 1px solid var(--panel-edge); border-radius: 6px;
+  color: var(--text); padding: 0.3em 0.5em; font-family: inherit; }
+/* details is OPTIONAL: light grey like an unselected button; turns dark grey
+   once it's focused or has text (like a selected button) */
+.off-details { width: 100%; background: var(--panel-edge); border: 1px solid var(--panel-edge);
+  border-radius: 8px; color: var(--text); padding: 0.7em 0.8em; font-size: 0.95rem; font-family: inherit; }
+.off-details:focus, .off-details:not(:placeholder-shown) { background: var(--track); }
+.off-details:focus { border-color: #fff; outline: none; }
+.off-details::placeholder { color: var(--text-dim); }
+.off-hint { font-size: 0.8rem; color: var(--text-dim); font-style: italic; margin-top: -0.5em; }
+.off-status { font-size: 0.85rem; color: var(--text-dim); min-height: 1.2em; text-align: center; }
+.off-status:empty { min-height: 0; }   /* collapse when there's no message */
+.off-recent-head-top { margin-top: -0.9em; }   /* tight gap above Added Activities */
+/* optional RescueTime API key (stored only in this browser, never in the repo) */
+.off-sync { display: flex; gap: 0.4em; align-self: stretch; align-items: center; }
+.off-key { flex: 1 1 auto; min-width: 0; background: var(--track); border: 1px solid var(--panel-edge);
+  border-radius: 6px; color: var(--text); padding: 0.4em 0.6em; font-family: inherit; font-size: 0.82rem; }
+.off-key:focus { border-color: #fff; outline: none; }
+.off-key::placeholder { color: var(--text-dim); }
+.off-keybtn { flex: 0 0 auto; }
+/* recent activities list — grows to fill the left column downward, scrolls */
+.off-recent { flex: 1 1 auto; min-height: 4em; overflow-y: auto; margin-top: 0.4em;
+  scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent; }
+.off-recent::-webkit-scrollbar { width: 6px; display: block; }
+.off-recent::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+.off-recent-head, .off-recent-empty { font-size: 0.7rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.5em; text-align: center; }
+.off-recent-empty { text-transform: none; letter-spacing: normal; font-style: italic; font-size: 0.85rem; }
+.off-rec-row { display: flex; flex-direction: column; padding: 0.4em 0.1em;
+  border-bottom: 1px solid var(--panel-edge); }
+.off-rec-name { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+.off-rec-meta { font-size: 0.78rem; color: var(--text-dim); }
+.off-rec-det { font-size: 0.8rem; color: var(--text-dim); font-style: italic; }
+/* day timeline (right) — fills height + scrolls; newest hour on top */
+.offline-day { position: relative; min-width: 0; overflow-y: auto; min-height: 0;
+  scrollbar-width: thin; scrollbar-color: var(--panel-edge) transparent; }
+.offline-day::-webkit-scrollbar { width: 6px; display: block; }
+.offline-day::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 3px; }
+/* day divider: big + centred across the calendar column (title-case, not caps) */
+.oh-day { font-size: 1.15rem; font-weight: 700; letter-spacing: 0.03em;
+  color: var(--text-dim); text-align: center; margin: 0.9em 0 0.45em; }
+.oh-row { display: grid; grid-template-columns: 3.4em 1fr; align-items: center; gap: 0.5em; margin-bottom: 3px; }
+.oh-time { font-size: 0.8rem; color: var(--text-dim); text-align: right; white-space: nowrap; }
+/* empty hour = LIGHT grey; selected (drag) = DARK grey which OVERRIDES any
+   productivity colour in that slot */
+.oh-track { position: relative; height: 1.5em; background: var(--panel-edge); border-radius: 4px;
+  display: flex; overflow: hidden; cursor: pointer; transition: background 0.1s; user-select: none; }
+.oh-track:hover { background: #454b52; }
+.oh-track.oh-sel { background: var(--track); }
+.oh-track.oh-sel .oh-seg { opacity: 0; }   /* dark grey takes priority over the bar colour */
+.oh-seg { height: 100%; pointer-events: none; }
+.oh-seg.oh-off { background: var(--pulse); }
+/* left-column + Added-Activities headlines — same look as the calendar's day
+   dividers (.oh-day): centred, dim, title-case (NOT all caps) */
+.off-head { font-size: 1.15rem; font-weight: 700; letter-spacing: 0.03em;
+  color: var(--text-dim); text-align: center; margin: 0; align-self: stretch; }
+/* character counter inside the details input (counts down from 40) — RIGHT side */
+.off-details-wrap { position: relative; align-self: stretch; width: 100%; }
+.off-details-wrap .off-details { padding-right: 2.7em; }
+.off-count { position: absolute; right: 0.75em; top: 50%; transform: translateY(-50%);
+  font-size: 0.8rem; color: var(--text-dim); font-variant-numeric: tabular-nums; pointer-events: none; }
+/* transient custom-activity name field (revealed by the Custom button) */
+.off-custom-input { align-self: stretch; width: 100%; background: var(--track);
+  border: 1px solid #fff; border-radius: 8px; color: var(--text);
+  padding: 0.6em 0.8em; font-family: inherit; font-size: 0.95rem; }
+.off-custom-input:focus { outline: none; }
+/* cog button (LEFT of Add, in the 3-col add row) — text colour matches the
+   unselected (light-grey) buttons' text */
+.off-cog { background: var(--panel-edge); border: 1px solid var(--panel-edge);
+  border-radius: 999px; color: var(--text-dim); padding: 0.5em; cursor: pointer; line-height: 0; }
+.off-cog:hover { background: #454b52; color: var(--text); }
+.off-cog svg { width: 1.4rem; height: 1.4rem; display: block; }
+.off-add.off-flash { animation: offFlash 0.6s ease; }
+@keyframes offFlash { 0%, 100% { background: var(--track); }
+  20%, 60% { background: var(--vdist); border-color: var(--vdist); color: #fff; } }
+/* settings modal (API key + manage custom activities) */
+.off-modal { position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.55); }
+.off-modal-card { position: absolute; left: 50%; transform: translateX(-50%);
+  width: min(88%, 360px); max-height: 30em; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 12px;
+  padding: 1.1em 1.3em; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
+.off-modal-head { display: flex; justify-content: space-between; align-items: center;
+  font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: 0.8em; }
+.off-modal-x { background: none; border: 0; color: var(--text-dim); font-size: 1.2rem; cursor: pointer; line-height: 1; }
+.off-modal-x:hover { color: var(--text); }
+.off-modal-err { background: rgba(214, 69, 65, 0.18); border: 1px solid var(--vdist); color: #f0a3a0;
+  border-radius: 8px; padding: 0.55em 0.75em; margin-bottom: 0.9em; font-size: 0.88rem; text-align: center; }
+.off-modal-sec { margin-bottom: 1.1em; }
+.off-modal-sec:last-child { margin-bottom: 0; }
+.off-modal-label { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 0.45em; }
+.off-modal-hint { font-size: 0.75rem; color: var(--text-dim); font-style: italic; margin-top: 0.35em; }
+/* activity names shown as pill buttons (same look as the add view); hover a
+   button and it turns RED and its label swaps to "Delete" */
+.off-modal-acts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4em; margin-bottom: 0.6em; }
+.off-modal-actbtn { position: relative; overflow: hidden; }
+.off-modal-actbtn::after { content: "Delete"; position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center; opacity: 0; color: #fff; font-weight: 600; }
+.off-modal-actbtn:hover { background: var(--vdist); border-color: var(--vdist); color: #fff; }
+.off-modal-actbtn:hover .actname { opacity: 0; }
+.off-modal-actbtn:hover::after { opacity: 1; }
+.off-modal-empty { font-size: 0.85rem; color: var(--text-dim); font-style: italic; grid-column: 1 / -1; }
+.off-addact { display: flex; gap: 0.4em; }
+.off-addact input { flex: 1 1 auto; min-width: 0; background: var(--track); border: 1px solid var(--panel-edge);
+  border-radius: 6px; color: var(--text); padding: 0.45em 0.6em; font-family: inherit; }
+.off-addact input:focus { outline: none; border-color: #fff; }
 .trend-body {
   flex: 1 1 auto; min-height: 0; margin-top: 0.4em;
   display: flex; flex-direction: column;
@@ -460,11 +623,11 @@ body.overlay-open .grid > .card:not(#searchCard) { visibility: hidden; }
   margin: 0; padding: 0.45em 1em;
   border: 1px solid var(--panel-edge);
   border-radius: 999px;
-  background: var(--track); color: #6a6a6a;
+  background: var(--panel-edge); color: var(--text-dim);   /* unselected = lighter grey */
 }
-.tab-row .tab:not(.active):hover { color: var(--text-dim); }
+.tab-row .tab:not(.active):hover { color: var(--text); }
 .tab-row .tab.active {
-  background: var(--panel-edge); color: var(--text);
+  background: var(--track); color: var(--text);   /* selected = dark, like the search bar */
 }
 /* NON-clickable group words in front of tabs (Weekly / Monthly / Yearly on
    the Trends card) — plain labels on the tab baseline, no box. FIXED width

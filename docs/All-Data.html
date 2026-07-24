@@ -5,9 +5,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=95">
-<link rel="icon" href="favicon.svg?v=95" type="image/svg+xml">
-<link rel="icon" href="favicon.ico?v=95" sizes="32x32">
+<link rel="stylesheet" href="styles.css?v=102">
+<link rel="icon" href="favicon.svg?v=102" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=102" sizes="32x32">
 
 </head>
 <body>
@@ -52,9 +52,16 @@
   <!-- 1. Pulse: past-24h / week / month donuts (label inside the hole) + trend delta bars.
        Clicking opens RescueTime: left third = today, middle = week, right = month. -->
   <div class="card" id="pulseCard" style="grid-column: 1 / -1">
-    <!-- top-left quick-links: History -> Highlights, OFF -> Offline Activities
-         (both open blank detail pages for now; content lands in a later pass) -->
+    <!-- top-left quick-links: + -> Manual (offline) Activities, History ->
+         Highlights, page -> Reports -->
     <div class="card-icons">
+      <button type="button" class="card-icon" id="iconOffline" title="Manual Activities" aria-label="Manual Activities">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="4" x2="12" y2="20"></line>
+          <line x1="4" y1="12" x2="20" y2="12"></line>
+        </svg>
+      </button>
       <button type="button" class="card-icon" id="iconHistory" title="Highlights" aria-label="Highlights">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round">
@@ -63,11 +70,14 @@
           <path d="M12 7v5l3 2"></path>
         </svg>
       </button>
-      <button type="button" class="card-icon" id="iconOffline" title="Offline Activities" aria-label="Offline Activities">
+      <button type="button" class="card-icon" id="iconReports" title="Reports" aria-label="Reports">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
-          <line x1="12" y1="2" x2="12" y2="12"></line>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="8" y1="13" x2="16" y2="13"></line>
+          <line x1="8" y1="17" x2="16" y2="17"></line>
+          <line x1="8" y1="9" x2="10" y2="9"></line>
         </svg>
       </button>
     </div>
@@ -87,8 +97,9 @@
         <div class="ring-row">
           <div class="ring-stat" id="to50_24h" hidden>
             <div class="stat-inner">
+              <div class="ring-stat-top">Need</div>
               <div class="ring-stat-val big" id="to50Val_24h">–</div>
-              <div class="row-label multi" id="to50Word_24h">Dist<br>Needed</div>
+              <div class="ring-stat-bot">Hours of<br><span id="to50Word_24h">Productive</span></div>
             </div>
           </div>
           <div class="pulse-wrap">
@@ -106,8 +117,9 @@
         <div class="ring-row">
           <div class="ring-stat" id="to50_week" hidden>
             <div class="stat-inner">
+              <div class="ring-stat-top">Need</div>
               <div class="ring-stat-val big" id="to50Val_week">–</div>
-              <div class="row-label multi" id="to50Word_week">Dist<br>Needed</div>
+              <div class="ring-stat-bot">Hours of<br><span id="to50Word_week">Productive</span></div>
             </div>
           </div>
           <div class="pulse-wrap">
@@ -125,8 +137,9 @@
         <div class="ring-row">
           <div class="ring-stat" id="to50_month" hidden>
             <div class="stat-inner">
+              <div class="ring-stat-top">Need</div>
               <div class="ring-stat-val big" id="to50Val_month">–</div>
-              <div class="row-label multi" id="to50Word_month">Dist<br>Needed</div>
+              <div class="ring-stat-bot">Hours of<br><span id="to50Word_month">Productive</span></div>
             </div>
           </div>
           <div class="pulse-wrap">
@@ -154,6 +167,22 @@
     </div>
   </div>
 
+  <!-- category / type cards RIGHT UNDER the pulse card (user: move them up) -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Top Categories - 7 Days</h2>
+      <div class="card-stat cat-mix" id="mixWeekCats"></div>
+    </div>
+    <div class="bar-list" id="catListWeek"></div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <h2>Top Types - 7 Days</h2>
+      <div class="card-stat cat-mix" id="mixTypes7"></div>
+    </div>
+    <div class="bar-list" id="typeList7"></div>
+  </div>
+
   <!-- 2a. Top apps over the ROLLING past 24 hours (hourly data) — same
        bar-list look as Weeks-Months.html -->
   <div class="card" id="card24h">
@@ -176,10 +205,8 @@
     <div class="chart-fill"><canvas id="dayChart"></canvas></div>
   </div>
 
-  <!-- 3. The Weeks-Months cards, merged into this ONE page so the search
-       overlays (detail cards) float over EVERYTHING. Row: apps side by side
-       (past 7 days | past 30 days), then categories for the same windows —
-       ROLLING windows, matching the pulse rings. -->
+  <!-- 3. The apps cards (past 7 days | past 30 days) at the bottom; the
+       category / type cards were moved up under the pulse card. -->
   <div class="card">
     <div class="card-head">
       <h2>Top Apps - 7 Days</h2>
@@ -195,22 +222,6 @@
       <div class="card-stat" id="totMonthApps"></div>
     </div>
     <div class="bar-list" id="appListMonth"></div>
-  </div>
-  <!-- category cards: instead of avg/total (already on the apps cards above)
-       the title row carries the per-level split, anchored LEFT -->
-  <div class="card">
-    <div class="card-head">
-      <h2>Top Categories - 7 Days</h2>
-      <div class="card-stat cat-mix" id="mixWeekCats"></div>
-    </div>
-    <div class="bar-list" id="catListWeek"></div>
-  </div>
-  <div class="card">
-    <div class="card-head">
-      <h2>Top Categories - 30 Days</h2>
-      <div class="card-stat cat-mix" id="mixMonthCats"></div>
-    </div>
-    <div class="bar-list" id="catListMonth"></div>
   </div>
 </div>
 
@@ -599,10 +610,10 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     const down = S >= 0;                 // at/above 50: show the Distracting budget
     const h = hrs(Math.abs(S) / days);
     const valEl = document.getElementById("to50Val_" + sfx);
-    valEl.textContent = h + "h";
+    valEl.textContent = h;   // no "h" suffix — bare number aligns with the pulse number
     valEl.style.color = down ? "var(--vdist)" : "var(--pulse)";  // red = Dist, blue = Prod
-    document.getElementById("to50Word_" + sfx).innerHTML =
-      (down ? "Dist" : "Prod") + "<br>Needed";
+    // layout: "Need" / <number> / "Hours of" / "Productive"|"Distracting"
+    document.getElementById("to50Word_" + sfx).textContent = down ? "Distracting" : "Productive";
     el.hidden = false;
     const perDay = days > 1 ? " Per Day" : "";
     el.dataset.tipTitle =
@@ -651,7 +662,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
   });
   document.getElementById("iconOffline").addEventListener("click", e => {
     e.stopPropagation();
-    showBlankDetail("Offline Activities");
+    showOfflineDetail();
+  });
+  document.getElementById("iconReports").addEventListener("click", e => {
+    e.stopPropagation();
+    showBlankDetail("Reports");
   });
   const card24 = document.getElementById("card24h");
   card24.classList.add("trend-zone");
@@ -1911,6 +1926,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
              <div class="bar-list" id="catRawList"></div></div>`]
         : []),
     ];
+    document.getElementById("appDetailTitle").classList.remove("tc");
     document.getElementById("appDetailTitle").textContent = catDisplay
       ? `${catDisplay} — ${p.label}`
       : `${p.label} — Details`;
@@ -2956,9 +2972,438 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     destroyDetailCharts();
     setSwitch(null);
     detailCtx = null;
+    document.getElementById("appDetailTitle").classList.remove("tc");
     document.getElementById("appDetailTitle").textContent = title;
     document.getElementById("appDetailFresh").textContent = "";
     document.getElementById("appDetailRows").innerHTML = "";
+    detailCard.hidden = false;
+    sizeDetailCard();
+    detailRefit = null;
+  }
+
+  // ---- OFFLINE ACTIVITIES page: LEFT = add-activity form (record offline time
+  //      and queue it for RescueTime), RIGHT = an hourly calendar of the past
+  //      24 hours. Opened by the pulse card's power icon. ----
+  let offlineEntries = [];      // offline activities (persisted to localStorage)
+  const OFF_LS = { entries: "rtOfflineEntries", acts: "rtOfflineActs", key: "rtOfflineKey", list: "rtOfflineActList" };
+  function showOfflineDetail() {
+    destroyDetailCharts();
+    setSwitch(null);
+    detailCtx = null;
+    const titleEl = document.getElementById("appDetailTitle");
+    titleEl.textContent = "Manual Activities";
+    titleEl.classList.add("tc");   // title-case, not the usual all-caps card title
+    document.getElementById("appDetailFresh").textContent =
+      data.generated_at ? `Data Up To ${new Date(data.generated_at).toLocaleString()}` : "";
+    const host = document.getElementById("appDetailRows");
+    const pad = n => String(n).padStart(2, "0");
+    const HOUR = 36e5, WEEK = 6048e5;
+    const MAX_BLOCK_MIN = 240;   // RescueTime caps one offline_time_post at 4 hours
+    const fmtHour = ms => { const d = new Date(ms); let h = d.getHours();
+      const ap = h < 12 ? "AM" : "PM"; return `${h % 12 || 12} ${ap}`; };
+    const fmtClock = ms => { const d = new Date(ms); const ap = d.getHours() < 12 ? "AM" : "PM";
+      return `${d.getHours() % 12 || 12}:${pad(d.getMinutes())} ${ap}`; };
+    const rtStamp = ms => { const d = new Date(ms);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`; };
+
+    // ---- PERSISTENCE: offline entries, the custom activity list and the
+    // optional RescueTime API key all live in THIS browser's localStorage, so
+    // they survive a refresh. The key is never committed to the repo.
+    const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+    try { const s = JSON.parse(lsGet(OFF_LS.entries)); if (Array.isArray(s)) offlineEntries = s; } catch {}
+    // the STANDARD activity buttons come from CODE (so edits here update the page
+    // instantly); only the user's own "+ Custom Activity" names persist in
+    // localStorage. Each name is what's posted as the RescueTime activity_name.
+    const DEFAULT_ACTS = ["Sleep", "Chores", "Eat", "Socializing", "Personal", "Exercise"];
+    // the WHOLE activity list is user-editable (add/delete ANY name, incl.
+    // defaults) and persisted; first run seeds it from DEFAULT_ACTS (+ any
+    // customs an older version saved)
+    let acts;
+    try { const full = JSON.parse(lsGet(OFF_LS.list)); if (Array.isArray(full)) acts = full; } catch {}
+    if (!acts) {
+      let old = []; try { const o = JSON.parse(lsGet(OFF_LS.acts)); if (Array.isArray(o)) old = o; } catch {}
+      acts = [...DEFAULT_ACTS, ...old.filter(a => !DEFAULT_ACTS.includes(a))];
+    }
+    let apiKey = lsGet(OFF_LS.key) || "";
+    const persist = () => { lsSet(OFF_LS.entries, JSON.stringify(offlineEntries)); lsSet(OFF_LS.list, JSON.stringify(acts)); };
+
+    let selAct = acts[0] ?? "";
+    let customMode = false, customName = "";   // "Custom" button = one-off name (NOT saved)
+    let detailsText = "";                       // survives form re-renders
+    let wkOffset = 0;                       // 0 = current week
+    let selDay = new Date(now).getTime();   // midnight of the selected day (today)
+    let selFrom = null, selUntil = null;    // "HH:MM" once picked (drag/click/edit)
+    let dragStartMs = null, dragEndMs = null;   // absolute drag range (may cross days)
+    const COG_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+
+    host.innerHTML = `
+      <div class="offline-grid">
+        <div class="offline-form" id="offForm"></div>
+        <div class="offline-day" id="offDay"></div>
+      </div>`;
+    const formEl = document.getElementById("offForm");
+    const dayEl = document.getElementById("offDay");
+    // the detail card closes on ANY inside click. The RIGHT calendar column never
+    // closes (bars OR the background between them). On the LEFT column only the
+    // interactive controls swallow the click, so clicking EMPTY form space still
+    // closes the page (user request).
+    dayEl.addEventListener("click", e => e.stopPropagation());
+    formEl.addEventListener("click", e => {
+      // only real controls swallow the click; labels, hints, the Added-Activities
+      // list and blank gaps all bubble → clicking empty left space still closes
+      if (e.target.closest("input, button, a, select, textarea")) e.stopPropagation();
+    });
+
+    // RIGHT: hourly calendar going back 7 DAYS — the MOST RECENT hour on top,
+    // the oldest at the bottom. Fills the card height and scrolls for the rest.
+    // Each hour is a track: logged part coloured by productivity, blank part
+    // darkens on hover.
+    const DAY_HOURS = 24 * 7;   // 7 days of hourly rows, scrollable
+    function renderTimeline() {
+      const topH = new Date(nowMs); topH.setMinutes(0, 0, 0, 0);
+      const slots = [];               // index 0 = current hour (top), older downward
+      for (let i = 0; i < DAY_HOURS; i++)
+        slots.push({ start: topH.getTime() - i * HOUR, lv: emptyLevels(), off: 0, labels: [] });
+      const idxOf = ms => Math.round((topH.getTime() - ms) / HOUR);
+      for (const [t, sec, , , , prod] of (data.hour_activities ?? [])) {
+        const d = new Date(t); d.setMinutes(0, 0, 0, 0);
+        const i = idxOf(d.getTime());
+        if (i < 0 || i >= DAY_HOURS) continue;
+        const l = String(prod);
+        if (l in slots[i].lv) slots[i].lv[l] += sec;
+      }
+      for (const e of offlineEntries) {
+        // spread the entry across EVERY hour it covers (so a multi-hour block
+        // fills those rows), not just its start hour
+        let s = e.startMs; const end = e.startMs + e.durMin * 60000; let first = true;
+        while (s < end) {
+          const hs = new Date(s); hs.setMinutes(0, 0, 0, 0);
+          const hStart = hs.getTime(), segEnd = Math.min(end, hStart + HOUR);
+          const i = idxOf(hStart);
+          if (i >= 0 && i < DAY_HOURS) {
+            slots[i].off += (segEnd - s) / 1000;
+            if (first) slots[i].labels.push(`${e.activity} ${e.durMin}m`);
+          }
+          s = segEnd; first = false;
+        }
+      }
+      const w = sec => (100 * sec / 3600).toFixed(2);
+      // a date divider whenever the day changes going down the list
+      let lastDay = null;
+      dayEl.innerHTML = slots.map(s => {
+        const dd = new Date(s.start); dd.setHours(0, 0, 0, 0);
+        let divider = "";
+        if (dd.getTime() !== lastDay) {
+          lastDay = dd.getTime();
+          const lbl = dd.getTime() === new Date(now).getTime() ? "Today"
+            : new Date(s.start).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+          divider = `<div class="oh-day" data-day="${dd.getTime()}">${lbl}</div>`;
+        }
+        const segs = LEVELS.map(l => s.lv[l] > 0
+            ? `<div class="oh-seg" style="width:${w(s.lv[l])}%;background:${COLORS[l]}"></div>` : "").join("")
+          + (s.off > 0 ? `<div class="oh-seg oh-off" style="width:${w(s.off)}%"></div>` : "");
+        const tot = LEVELS.reduce((a, l) => a + s.lv[l], 0) + s.off;
+        const tip = (tot > 0
+          ? `${fmtHour(s.start)} — ${hrs(tot)}h logged${s.labels.length ? " · " + s.labels.join(", ") : ""}`
+          : `${fmtHour(s.start)} — blank`).replace(/"/g, "&quot;");
+        return divider + `<div class="oh-row"><div class="oh-time">${fmtHour(s.start)}</div>` +
+          `<div class="oh-track" data-start="${s.start}" title="${tip}">${segs}</div></div>`;
+      }).join("");
+      // click / drag selection is wired once on dayEl (delegated) below
+    }
+
+    // scroll the calendar so the given day's rows are in view
+    function scrollToDay(dayMs) {
+      const t = dayEl.querySelector(`.oh-day[data-day="${dayMs}"]`);
+      if (t) dayEl.scrollTop = Math.max(0, t.offsetTop - 4);
+    }
+
+    // recent offline activities, newest first, under the Add button — grows to
+    // fill the left column downward (scrolls past that)
+    function renderRecent() {
+      const el = document.getElementById("offRecent");
+      if (!el) return;
+      if (!offlineEntries.length) {
+        el.innerHTML = `<div class="off-recent-empty">No offline activities added yet.</div>`;
+        return;
+      }
+      el.innerHTML =
+        [...offlineEntries].reverse().map(e => {
+          const when = new Date(e.startMs).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+          return `<div class="off-rec-row">
+              <span class="off-rec-name">${(e.activity || "").replace(/</g, "&lt;")}</span>
+              <span class="off-rec-meta">${when} · ${fmtClock(e.startMs)} · ${e.durMin}m</span>
+              ${e.details ? `<span class="off-rec-det">${e.details.replace(/</g, "&lt;")}</span>` : ""}
+            </div>`;
+        }).join("");
+    }
+
+    // LEFT: the add-activity form (week/day picker, from/until, activity chips,
+    // + new activity, details, Add Activity)
+    function renderForm() {
+      const ws = weekStart(new Date(now.getTime() + wkOffset * WEEK));   // Monday of the shown week
+      const days = [];
+      for (let i = 0; i < 7; i++) { const d = new Date(ws); d.setDate(ws.getDate() + i); d.setHours(0, 0, 0, 0); days.push(d); }
+      const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      const todayMid = new Date(now).getTime();
+      const now2 = new Date(nowMs);
+      // which day(s) are "selected" — a cross-day drag highlights EVERY day it
+      // spans, so both days get the dark active background
+      const selDaysSet = new Set([selDay]);
+      if (dragStartMs != null && dragEndMs != null && dragEndMs > dragStartMs) {
+        selDaysSet.clear();
+        const last = new Date(dragEndMs - 1); last.setHours(0, 0, 0, 0);
+        for (let d = new Date(dragStartMs); (d.setHours(0, 0, 0, 0), d.getTime()) <= last.getTime(); d.setDate(d.getDate() + 1))
+          selDaysSet.add(d.getTime());
+      }
+      const dayCells = days.map(d => {
+        const future = d.getTime() > todayMid, sel = selDaysSet.has(d.getTime());
+        return `<button type="button" class="pswitch-btn off-day${sel ? " active" : ""}" data-day="${d.getTime()}"${future ? " disabled" : ""}>${d.getDate()}</button>`;
+      }).join("");
+      const wdHead = WD.map(w => `<div class="off-wd">${w}</div>`).join("");
+      const actBtns = acts.map(a =>
+        `<button type="button" class="pswitch-btn off-act${!customMode && a === selAct ? " active" : ""}" data-act="${a.replace(/"/g, "&quot;")}">${a}</button>`).join("")
+        + `<button type="button" class="pswitch-btn off-act off-custombtn${customMode ? " active" : ""}" id="offCustomBtn">Custom</button>`;
+      const detLen = detailsText.length;
+      formEl.innerHTML = `
+        <div class="off-head">Add Activity</div>
+        <div class="off-week">
+          <button type="button" class="off-wk-nav" data-wk="-1">‹</button>
+          <div class="off-cal">
+            <div class="off-wd-row">${wdHead}</div>
+            <div class="off-day-row">${dayCells}</div>
+          </div>
+          <button type="button" class="off-wk-nav" data-wk="1"${wkOffset >= 0 ? " disabled" : ""}>›</button>
+        </div>
+        <div class="off-time-row">
+          <span class="off-tlabel">From</span>
+          <input type="time" id="offFrom" class="off-time" value="${selFrom ?? `${pad(now2.getHours())}:00`}">
+          <span class="off-tlabel">Until</span>
+          <input type="time" id="offUntil" class="off-time" value="${selUntil ?? `${pad((now2.getHours() + 1) % 24)}:00`}">
+        </div>
+        <div class="off-acts">${actBtns}</div>
+        ${customMode ? `<input type="text" id="offCustomName" class="off-custom-input" maxlength="40" placeholder="Custom activity name (for this entry)" value="${esc(customName)}">` : ""}
+        <div class="off-details-wrap">
+          <span class="off-count" id="offCount">${40 - detLen}</span>
+          <input type="text" id="offDetails" class="off-details" maxlength="40" placeholder="Add details about your time" value="${esc(detailsText)}">
+        </div>
+        <div class="off-add-row">
+          <button type="button" class="off-cog" id="offCog" title="Settings" aria-label="Settings">${COG_SVG}</button>
+          <button type="button" class="pswitch-btn off-add active" id="offAdd">Add Activity</button>
+        </div>
+        <div class="off-status" id="offStatus"></div>
+        <div class="off-head off-recent-head-top">Added Activities</div>
+        <div class="off-recent" id="offRecent"></div>`;
+      formEl.querySelectorAll(".off-day").forEach(b =>
+        b.addEventListener("click", () => { selDay = +b.dataset.day; dragStartMs = dragEndMs = null; renderForm(); scrollToDay(selDay); }));
+      // manual time edits cancel any drag range (they define a single-day block)
+      document.getElementById("offFrom").addEventListener("change", e => { selFrom = e.target.value; dragStartMs = dragEndMs = null; });
+      document.getElementById("offUntil").addEventListener("change", e => { selUntil = e.target.value; dragStartMs = dragEndMs = null; });
+      formEl.querySelectorAll(".off-wk-nav").forEach(b =>
+        b.addEventListener("click", () => { if (b.disabled) return; wkOffset = Math.min(0, wkOffset + (+b.dataset.wk)); renderForm(); }));
+      formEl.querySelectorAll(".off-act").forEach(b =>
+        b.addEventListener("click", () => {
+          if (b.id === "offCustomBtn") { customMode = true; renderForm(); document.getElementById("offCustomName")?.focus(); }
+          else { customMode = false; selAct = b.dataset.act; renderForm(); }
+        }));
+      document.getElementById("offCustomName")?.addEventListener("input", e => { customName = e.target.value; });
+      // live character counter (counts DOWN from 40)
+      const det = document.getElementById("offDetails");
+      det.addEventListener("input", () => { detailsText = det.value; document.getElementById("offCount").textContent = 40 - det.value.length; });
+      document.getElementById("offCog").addEventListener("click", () => openModal());
+      document.getElementById("offAdd").addEventListener("click", onAdd);
+      renderRecent();
+    }
+
+    function onAdd() {
+      const status = document.getElementById("offStatus");
+      // this button's job is to SEND to RescueTime — no key means it can't. Flash
+      // the button red and open the settings card with the error.
+      if (!apiKey) {
+        const add = document.getElementById("offAdd");
+        add.classList.remove("off-flash"); void add.offsetWidth; add.classList.add("off-flash");
+        openModal("Add Rescuetime API to send manual Activities.");
+        return;
+      }
+      let startMs, durMin;
+      if (dragStartMs != null && dragEndMs != null && dragEndMs > dragStartMs) {
+        // a drag range (can span days) wins over the From/Until inputs
+        startMs = dragStartMs; durMin = Math.round((dragEndMs - dragStartMs) / 60000);
+      } else {
+        const from = document.getElementById("offFrom").value, until = document.getElementById("offUntil").value;
+        if (!from || !until) { status.textContent = "Pick a start and end time."; return; }
+        const [fh, fm] = from.split(":").map(Number), [uh, um] = until.split(":").map(Number);
+        startMs = selDay + (fh * 60 + fm) * 60000;
+        durMin = Math.round((selDay + (uh * 60 + um) * 60000 - startMs) / 60000);
+      }
+      if (!(durMin > 0)) { status.textContent = "The end time must be after the start time."; return; }
+      const details = document.getElementById("offDetails").value.trim();
+      const activity = (customMode ? (customName.trim() || "Custom") : selAct);
+      // RescueTime caps ONE offline_time_post at 4 h, so split anything longer
+      // into back-to-back ≤4 h blocks — one post per block.
+      const chunks = [];
+      let cs = startMs, rem = durMin;
+      while (rem > 0) {
+        const d = Math.min(MAX_BLOCK_MIN, rem);
+        chunks.push({ startMs: cs, durMin: d, activity, details });
+        cs += d * 60000; rem -= d;
+      }
+      offlineEntries.push(...chunks);
+      persist();
+      // reset the picker + form for the next entry
+      dragStartMs = dragEndMs = null; selFrom = selUntil = null;
+      detailsText = ""; customMode = false; customName = "";
+      renderForm();          // rebuilds the form (also calls renderRecent)
+      renderTimeline();
+      uploadOffline(chunks, document.getElementById("offStatus"));
+    }
+
+    async function uploadOffline(entries, statusEl) {
+      const total = entries.reduce((a, e) => a + e.durMin, 0);
+      const summary = entries.length > 1
+        ? `${entries.length} × ≤4h blocks (${entries[0].activity}, ${total}m total)`
+        : `"${entries[0].activity}" · ${entries[0].durMin}m · ${fmtClock(entries[0].startMs)}`;
+      if (!apiKey) {
+        statusEl.textContent = `Added ${summary} — saved in this browser. Add your RescueTime API key to sync.`;
+        return;
+      }
+      // RescueTime's API sends no CORS headers, so the browser can DELIVER a
+      // simple form POST but can't READ the response. We post each block
+      // (no-cors) and report it as sent — verify it landed in RescueTime.
+      try {
+        for (const e of entries) {
+          const body = new URLSearchParams({ key: apiKey, start_time: rtStamp(e.startMs),
+            duration: String(e.durMin), activity_name: e.activity, activity_details: e.details });
+          await fetch("https://www.rescuetime.com/anapi/offline_time_post",
+            { method: "POST", mode: "no-cors", body });
+        }
+        statusEl.textContent = `Added ${summary} — sent to RescueTime (verify there; the browser can't confirm cross-origin responses).`;
+      } catch {
+        statusEl.textContent = `Added ${summary} — saved locally, but the RescueTime request failed.`;
+      }
+    }
+
+    // ---- click / drag across calendar hours → select a range and fill the day
+    // + From/Until. A single click = one hour. The range CAN span days (drag
+    // from today 2am up to yesterday 9pm). Delegated on dayEl so it survives
+    // timeline re-renders.
+    let dragAnchor = null;
+    const clockHM = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+    const applyRange = (anchorMs, curMs) => {
+      const lo = Math.min(anchorMs, curMs), hi = Math.max(anchorMs, curMs);
+      const picked = [];
+      dayEl.querySelectorAll(".oh-track").forEach(tr => {
+        const s = +tr.dataset.start;
+        const inRange = s >= lo && s <= hi;
+        tr.classList.toggle("oh-sel", inRange);
+        if (inRange) picked.push(s);
+      });
+      if (!picked.length) return;
+      picked.sort((x, y) => x - y);
+      dragStartMs = picked[0];                       // start of the earliest hour
+      dragEndMs = picked[picked.length - 1] + HOUR;   // end of the latest hour
+      const sd = new Date(dragStartMs); sd.setHours(0, 0, 0, 0);
+      selDay = sd.getTime();
+      selFrom = clockHM(dragStartMs);
+      selUntil = clockHM(dragEndMs);
+      wkOffset = Math.round((weekStart(new Date(selDay)).getTime() - weekStart(now).getTime()) / WEEK);
+      const f = document.getElementById("offFrom"), u = document.getElementById("offUntil");
+      if (f) f.value = selFrom;
+      if (u) u.value = selUntil;
+    };
+    const endDrag = () => { if (dragAnchor == null) return; dragAnchor = null; renderForm(); };
+    dayEl.addEventListener("mousedown", e => {
+      const tr = e.target.closest(".oh-track"); if (!tr) return;
+      e.preventDefault();
+      dayEl.querySelectorAll(".oh-track.oh-sel").forEach(t => t.classList.remove("oh-sel"));
+      dragAnchor = +tr.dataset.start;
+      applyRange(dragAnchor, dragAnchor);
+    });
+    dayEl.addEventListener("mousemove", e => {
+      if (dragAnchor == null) return;
+      const tr = e.target.closest(".oh-track"); if (!tr) return;
+      applyRange(dragAnchor, +tr.dataset.start);
+    });
+    dayEl.addEventListener("mouseup", endDrag);
+    dayEl.addEventListener("mouseleave", endDrag);
+
+    // ---- SETTINGS MODAL: RescueTime API key + manage the WHOLE activity list
+    // (add / delete any). Names show as pills (same look as the add view);
+    // hovering a pill turns it red and swaps its label to "Delete". ----
+    function renderModalActs() {
+      const el = document.getElementById("offModalActs");
+      if (!el) return;
+      el.innerHTML = acts.length
+        ? acts.map(a => `<button type="button" class="pswitch-btn off-modal-actbtn" data-del="${esc(a)}"><span class="actname">${esc(a)}</span></button>`).join("")
+        : `<div class="off-modal-empty">No activities — add one below.</div>`;
+      el.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => {
+        const name = btn.dataset.del;
+        acts = acts.filter(x => x !== name);
+        if (selAct === name) selAct = acts[0] ?? "";
+        persist(); renderModalActs(); renderForm();
+      }));
+    }
+    function openModal(errText) {
+      const modal = document.getElementById("offModal");
+      const err = document.getElementById("offModalErr");
+      if (errText) { err.textContent = errText; err.hidden = false; } else { err.hidden = true; }
+      document.getElementById("offKey").value = apiKey;
+      document.getElementById("offKeySave").classList.toggle("active", !!apiKey);
+      renderModalActs();
+      modal.hidden = false;
+      // anchor the card vertically around the cog (which the user just clicked,
+      // so it's in view) — robust whatever the card's height/scroll
+      const cog = document.getElementById("offCog"), inner = modal.querySelector(".off-modal-card");
+      const cogR = cog.getBoundingClientRect(), cardR = detailCard.getBoundingClientRect();
+      inner.style.top = Math.max(8, (cogR.top - cardR.top) - inner.offsetHeight / 2) + "px";
+    }
+    const closeModal = () => { document.getElementById("offModal").hidden = true; };
+    document.getElementById("offModal")?.remove();   // drop any leftover from a prior open
+    const modalEl = document.createElement("div");
+    modalEl.className = "off-modal"; modalEl.id = "offModal"; modalEl.hidden = true;
+    modalEl.innerHTML = `
+      <div class="off-modal-card">
+        <div class="off-modal-head"><span>Settings</span><button type="button" class="off-modal-x" id="offModalX">✕</button></div>
+        <div class="off-modal-err" id="offModalErr" hidden></div>
+        <div class="off-modal-sec">
+          <div class="off-modal-label">RescueTime API Key</div>
+          <div class="off-sync">
+            <input type="password" id="offKey" class="off-key" autocomplete="off" placeholder="Paste your RescueTime API key">
+            <button type="button" class="pswitch-btn off-keybtn" id="offKeySave">Save</button>
+          </div>
+          <div class="off-modal-hint">Stored only in this browser, never in the repo. Needed to send offline activities.</div>
+        </div>
+        <div class="off-modal-sec">
+          <div class="off-modal-label">Activities</div>
+          <div class="off-modal-acts" id="offModalActs"></div>
+          <div class="off-addact">
+            <input type="text" id="offAddActName" maxlength="30" placeholder="New activity name">
+            <button type="button" class="pswitch-btn" id="offAddActBtn">Add</button>
+          </div>
+        </div>
+      </div>`;
+    detailCard.appendChild(modalEl);
+    // clicks inside the modal must NOT close the detail card; backdrop closes the modal
+    modalEl.addEventListener("click", e => {
+      e.stopPropagation();
+      if (e.target === modalEl) closeModal();
+    });
+    document.getElementById("offModalX").addEventListener("click", closeModal);
+    document.getElementById("offKeySave").addEventListener("click", () => {
+      apiKey = document.getElementById("offKey").value.trim();
+      lsSet(OFF_LS.key, apiKey);
+      document.getElementById("offKeySave").classList.toggle("active", !!apiKey);
+      document.getElementById("offModalErr").hidden = true;
+    });
+    document.getElementById("offAddActBtn").addEventListener("click", () => {
+      const inp = document.getElementById("offAddActName"), v = inp.value.trim();
+      if (v && !acts.includes(v)) { acts.push(v); persist(); renderModalActs(); renderForm(); }
+      inp.value = "";
+    });
+
+    renderForm();
+    renderTimeline();
     detailCard.hidden = false;
     sizeDetailCard();
     detailRefit = null;
@@ -2968,6 +3413,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     destroyDetailCharts();   // the card may currently hold another view's charts
     setSwitch(null);         // the period switcher is for entity/period pages only
     const T = await trendData();
+    document.getElementById("appDetailTitle").classList.remove("tc");
     document.getElementById("appDetailTitle").textContent =
       "Trends — Pulse Over Time";
     const fetchedAt = T.arch?.updated_at ?? data.generated_at;
@@ -3107,7 +3553,7 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
     // (weekly for the 7-day cards, monthly for the 30-day ones)
     const CARD_TABS = {
       appListWeek:  "w-apps",  appListMonth: "m-apps",
-      catListWeek:  "w-cats",  catListMonth: "m-cats",
+      catListWeek:  "w-cats",  typeList7:    "w-pulse",
     };
     for (const [id, key] of Object.entries(CARD_TABS)) {
       const card = document.getElementById(id).closest(".card");
@@ -3183,7 +3629,45 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
         // ALWAYS keep the top 5; the 0.5 h floor only cuts rows beyond them
         .filter(([, total], i) => i < 5 || total >= MIN_LOGGED_SEC)
         .slice(0, CAT_N);
-      renderBarList(catElId, cats);
+      if (catElId) renderBarList(catElId, cats);
+    }
+
+    // productivity TYPES (Very Productive .. Very Distracting) over a set of
+    // activity rows, rendered like the category cards. Feeds the front page's
+    // "Top Types - 7 Days" card (replaced the old 30-day categories card).
+    function renderTypes(rows, listId, mixId, perLabel) {
+      const lv = emptyLevels(), lvApps = {};
+      for (const [, sec, , activity, , prod] of (rows ?? [])) {
+        const l = String(prod);
+        if (!(l in lv)) continue;
+        lv[l] += sec;
+        (lvApps[l] ??= new Map()).set(appName(activity),
+          (lvApps[l]?.get(appName(activity)) ?? 0) + sec);
+      }
+      const grand = LEVELS.reduce((a, l) => a + lv[l], 0);
+      const entries = LEVELS
+        .map(l => {
+          const sec = lv[l];
+          const share = grand > 0 ? Math.round(100 * sec / grand) + "%" : "0%";
+          const tops = [...(lvApps[l] ?? new Map())].sort((a, b) => b[1] - a[1])
+            .slice(0, 5).map(([n, s]) => `   ${hrs(s)}h  ${n}`).join("\n");
+          return [NAMES[l], sec, l,
+            `${hrs(sec)}h ${NAMES[l]}\n${share} Of Your ${perLabel} Time` +
+            (tops ? "\n" + tops : ""), share,
+            { kind: "lvl", key: l, period: perLabel }];
+        })
+        .sort((a, b) => b[1] - a[1]);
+      renderBarList(listId, entries);
+      if (mixId) {
+        const prod = lv["2"] + lv["1"], neut = lv["0"], dist = lv["-1"] + lv["-2"];
+        const el = document.getElementById(mixId);
+        el.textContent = `${hrs(prod)}h Productive - ${hrs(neut)}h Neutral - ${hrs(dist)}h Distracting`;
+        el.dataset.tipTitle = `${perLabel}: ${hrs(grand)}h Logged`;
+        el.dataset.tipBody =
+          `Very Productive ${hrs(lv["2"])}h + Productive ${hrs(lv["1"])}h\n` +
+          `Neutral ${hrs(neut)}h\n` +
+          `Distracting ${hrs(lv["-1"])}h + Very Distracting ${hrs(lv["-2"])}h`;
+      }
     }
 
     // per-day breakdown for the 7-day app tooltips (hours per day, past 7
@@ -3269,8 +3753,11 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
       const week7Rows = curWkRows.length ? curWkRows : data.week_activities;
       renderPeriod(week7Rows, "appListWeek", "catListWeek", tip7, prev7,
                    "Current 7 Days");
-      // Past 30 days incl. today (rolling, like the pulse's month ring)
-      renderPeriod(data.month_activities, "appListMonth", "catListMonth",
+      // productivity Types over the past 7 days (replaced the 30-day cats card)
+      renderTypes(week7Rows, "typeList7", "mixTypes7", "Current 7 Days");
+      // Past 30 days incl. today (rolling, like the pulse's month ring); the
+      // 30-day CATEGORIES card is gone, so no cat list target for this one
+      renderPeriod(data.month_activities, "appListMonth", null,
                    tip30, prev30, "Current 30 Days");
       // total logged hours per period, anchored right on each title row
       const totOf = rows => (rows ?? []).reduce((s, r) => s + r[1], 0);
@@ -3307,7 +3794,6 @@ Promise.all([loadJson("data.json", null), loadJson("dictionary.json", {})]).then
           `Distracting ${hrs(lv["-1"])}h + Very Distracting ${hrs(lv["-2"])}h`;
       };
       setMix("mixWeekCats", week7Rows, "Current 7 Days");
-      setMix("mixMonthCats", data.month_activities, "Current 30 Days");
     });
   }
 });

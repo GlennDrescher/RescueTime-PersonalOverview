@@ -290,12 +290,14 @@ def main():
     if not refresh_recent(archive, key, today, max(1, args.refresh_days)):
         sys.exit("Today's fetch failed - archive.json/data.json NOT updated.")
 
-    # hourly rows for the rolling last-24h card + pulse: 2 days back gives the
-    # UI a full 48 h so it can also compare against the PREVIOUS 24 h window
+    # hourly rows: 6 days back (= 7 calendar days incl. today) so the Offline
+    # page's 7-day calendar can populate every hour; the rolling last-24h card,
+    # the pulse's prior-24h compare, and the Trends Daily group all still read
+    # their own sub-windows out of this.
     time.sleep(SLEEP)
     hourly = fetch(key, "hourly apps", perspective="interval",
                    resolution_time="hour", restrict_kind="activity",
-                   restrict_begin=(today - timedelta(days=2)).isoformat(),
+                   restrict_begin=(today - timedelta(days=6)).isoformat(),
                    restrict_end=today.isoformat())
     hour_rows = (hourly or {}).get("rows", [])
     if hour_rows:                      # v81: keep the time-of-day quarters
